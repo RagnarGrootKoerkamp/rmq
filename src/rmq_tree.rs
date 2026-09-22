@@ -7,7 +7,7 @@ pub struct RMQTree<'a> {
 
 impl<'a> RMQTree<'a> {
     fn _init(&mut self) {
-        for i in (1..(self.n as usize) - 1).rev() {
+        for i in (1..self.n - 1).rev() {
             self.data[i] = self.data[2 * i].min(self.data[2 * i + 1]);
         }
     }
@@ -18,10 +18,10 @@ impl<'a> RMQ<'a, u64> for RMQTree<'a> {
         let n = reference.len();
         let mut tree = Self {
             n,
-            data: vec![&reference[0]; (2 * n) as usize],
+            data: vec![&reference[0]; ((2 * n))],
         };
         for i in 0..n {
-            tree.data[(n + i) as usize] = &reference[i as usize];
+            tree.data[((n + i))] = &reference[i];
         }
         tree._init();
         tree
@@ -31,21 +31,21 @@ impl<'a> RMQ<'a, u64> for RMQTree<'a> {
     fn rmq(&self, mut l: usize, mut r: usize) -> usize {
         l += self.n;
         r += self.n + 1;
-        let mut left_min = self.data[l as usize];
-        let mut right_min = self.data[(r - 1) as usize];
+        let mut left_min = self.data[l];
+        let mut right_min = self.data[((r - 1))];
         while l < r {
             if l % 2 == 1 {
-                left_min = left_min.min(self.data[l as usize]);
+                left_min = left_min.min(self.data[l]);
                 l += 1;
             }
             if r % 2 == 1 {
-                right_min = self.data[(r - 1) as usize].min(right_min);
+                right_min = self.data[((r - 1))].min(right_min);
                 r -= 1;
             }
             l /= 2;
             r /= 2;
         }
-        let pointer: *const u64 = (left_min.min(right_min));
+        let pointer: *const u64 = left_min.min(right_min);
         let origin: *const u64 = self.data[0];
         unsafe { (pointer.offset_from(origin)) as usize }
     }

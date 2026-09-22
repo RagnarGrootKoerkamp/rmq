@@ -10,13 +10,13 @@ pub struct SparseTable<'a> {
 
 impl<'a> RMQ<'a, u64> for SparseTable<'a> {
     fn new(data: &'a [u64]) -> Self {
-        let n = data.len() as usize;
+        let n = data.len();
         let k_max = n.ilog2() as usize;
         let mut table = Self {
             n,
             k_max,
             data,
-            offsets: vec![0; ((k_max) * n) as usize],
+            offsets: vec![0; (((k_max) * n))],
         };
         for i in 0..table.n - 1 {
             table.offsets[i] = if table.data[i] <= table.data[i + 1] {
@@ -28,9 +28,9 @@ impl<'a> RMQ<'a, u64> for SparseTable<'a> {
         for k in 2..=table.k_max {
             for i in 0..table.n + 1 - (1 << k) {
                 let loffset = table.offsets[(k - 2) * table.n + i];
-                let roffset = table.offsets[(k - 2) * table.n + i + (1 << k - 1)] + (1 << k - 1);
-                table.offsets[((k-1) * table.n + i)] =
-                    if (table.data[i + loffset] <= table.data[i + roffset]) {
+                let roffset = table.offsets[(k - 2) * table.n + i + (1 << (k - 1))] + (1 << (k - 1));
+                table.offsets[(k-1) * table.n + i] =
+                    if table.data[i + loffset] <= table.data[i + roffset] {
                         loffset
                     } else {
                         roffset
