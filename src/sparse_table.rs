@@ -1,6 +1,6 @@
-use crate::base::RMQ;
+use crate::base::{RMQ, RMQFamily};
 
-pub struct SparseTable<'a> {
+pub struct OffsetSparseTable<'a> {
     n: usize,
     k_max: usize,
     data: &'a [u64],
@@ -8,7 +8,7 @@ pub struct SparseTable<'a> {
     offsets: Vec<usize>,
 }
 
-impl<'a> RMQ<'a, u64> for SparseTable<'a> {
+impl<'a> RMQ<'a, u64> for OffsetSparseTable<'a> {
     fn new(data: &'a [u64]) -> Self {
         let n = data.len();
         let k_max = n.ilog2() as usize;
@@ -60,65 +60,10 @@ impl<'a> RMQ<'a, u64> for SparseTable<'a> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Family type for [`OffsetSparseTable`]. Never instantiated; it exists only so
+/// generic code can name the structure without committing to an input lifetime.
+pub struct SparseTableFamily;
 
-    use rand::prelude::*;
-    use rand::rngs::Xoshiro256PlusPlus;
-    use rand::seq::SliceRandom;
-
-    fn calculate_random_permutation(rng: &mut dyn Rng, n: u64) -> Vec<u64> {
-        let mut v: Vec<u64> = (0..n).collect();
-        v.shuffle(rng);
-        v
-    }
-
-    fn get_rng() -> Xoshiro256PlusPlus {
-        Xoshiro256PlusPlus::seed_from_u64(42)
-    }
-
-    #[test]
-    fn test_init() {
-        let data = calculate_random_permutation(&mut get_rng(), 100);
-        let _table = SparseTable::new(&data);
-    }
-
-    fn eval_range<'a>(data: &'a [u64], rmq: &'a dyn RMQ<'a, u64>, l: usize, r: usize) {
-        let expected = l + data[l..=r]
-            .iter()
-            .enumerate()
-            .min_by_key(|x| x.1)
-            .unwrap()
-            .0;
-        let actual = rmq.rmq(l, r);
-        assert_eq!(expected, actual);
-    }
-
-    #[test]
-    fn test_query_random() {
-        let mut rng = get_rng();
-        let data = calculate_random_permutation(&mut rng, 100);
-        let _table = SparseTable::new(&data);
-        for _ in 0..100 {
-            // BUG: Ranges not uniformly random!
-            let l = rng.random_range(0..data.len());
-            let r = rng.random_range(l..data.len());
-
-            eval_range(&data, &_table, l, r);
-        }
-    }
-
-    #[test]
-    fn test_query_edges() {
-        let mut rng = get_rng();
-        let data = calculate_random_permutation(&mut rng, 100);
-        let _table = SparseTable::new(&data);
-
-        eval_range(&data, &_table, 0, 99);
-        eval_range(&data, &_table, 0, 0);
-        eval_range(&data, &_table, 99, 99);
-
-        eval_range(&data, &_table, 50, 99);
-    }
+impl RMQFamily<u64> for SparseTableFamily {
+    type Rmq<'a> = OffsetSparseTable<'a>;
 }

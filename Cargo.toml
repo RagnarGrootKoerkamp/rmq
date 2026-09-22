@@ -6,8 +6,15 @@ edition = "2024"
 [dependencies]
 rand = "0.10.2"
 
+[features]
+# Exposes `rmq::testing` and the `rmq_conformance!` macro to integration tests.
+testing = []
+
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
+# Self dev-dependency: makes `cargo test`/`cargo bench` build the lib with
+# `testing` enabled, without leaking the helpers into normal builds.
+rmq = { path = ".", features = ["testing"] }
 
 [[bench]]
 name = "my_benchmark"
