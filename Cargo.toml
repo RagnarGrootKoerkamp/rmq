@@ -17,9 +17,5 @@ criterion = { version = "0.8", features = ["html_reports"] }
 rmq = { path = ".", features = ["testing"] }
 
 [[bench]]
-name = "my_benchmark"
-harness = false
-
-[[bench]]
 name = "scaling"
 harness = false
