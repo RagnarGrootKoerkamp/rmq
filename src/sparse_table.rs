@@ -93,13 +93,29 @@ impl<'a> IndexSparseTable<'a> {
         }
         table
     }
+}
+
+impl<'a> RMQ<'a, u64> for IndexSparseTable<'a> {
+    fn new(data: &'a [u64]) -> Self
+    where
+        Self: Sized,
+    {
+        let indices: Vec<usize> = (0..data.len()).collect();
+        IndexSparseTable::new(data, &indices)
+    }
 
     // Queries [l, r]
-    pub fn rmq(&self, l: usize, r: usize) -> usize {
+    fn rmq(&self, l: usize, r: usize) -> usize {
         let k = (r - l + 1).ilog2() as usize;
         let left_index = self.indices[k * self.n + l];
         let right_index = self.indices[k * self.n + r + 1 - (1 << k)];
 
         self.data.argmin(left_index, right_index)
     }
+}
+
+pub struct IndexSparseTableFamily;
+
+impl RMQFamily<u64> for IndexSparseTableFamily {
+    type Rmq<'a> = IndexSparseTable<'a>;
 }
