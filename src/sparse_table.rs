@@ -16,7 +16,7 @@ impl<'a> RMQ<'a, u64> for OffsetSparseTable<'a> {
             n,
             k_max,
             data,
-            offsets: vec![0; (((k_max) * n))],
+            offsets: vec![0; (k_max) * n],
         };
         for i in 0..table.n - 1 {
             table.offsets[i] = if table.data[i] <= table.data[i + 1] {
@@ -28,8 +28,9 @@ impl<'a> RMQ<'a, u64> for OffsetSparseTable<'a> {
         for k in 2..=table.k_max {
             for i in 0..table.n + 1 - (1 << k) {
                 let loffset = table.offsets[(k - 2) * table.n + i];
-                let roffset = table.offsets[(k - 2) * table.n + i + (1 << (k - 1))] + (1 << (k - 1));
-                table.offsets[(k-1) * table.n + i] =
+                let roffset =
+                    table.offsets[(k - 2) * table.n + i + (1 << (k - 1))] + (1 << (k - 1));
+                table.offsets[(k - 1) * table.n + i] =
                     if table.data[i + loffset] <= table.data[i + roffset] {
                         loffset
                     } else {
@@ -77,9 +78,9 @@ impl<'a> IndexSparseTable<'a> {
             n,
             k_max,
             data,
-            indices: vec![0; (k_max+1) * n],
+            indices: vec![0; (k_max + 1) * n],
         };
-        
+
         for i in 0..n {
             table.indices[i] = indices[i];
         }

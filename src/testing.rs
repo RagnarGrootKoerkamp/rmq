@@ -82,7 +82,13 @@ pub fn test_edge_ranges<F: RMQFamily<u64>>() {
     let naive = NaiveRMQ::new(&data);
     let test_object = F::Rmq::new(&data);
     let n = data.len();
-    for (l, r) in [(0, n - 1), (0, 0), (n - 1, n - 1), (n / 2, n - 1), (0, n / 2)] {
+    for (l, r) in [
+        (0, n - 1),
+        (0, 0),
+        (n - 1, n - 1),
+        (n / 2, n - 1),
+        (0, n / 2),
+    ] {
         assert_eq!(test_object.rmq(l, r), naive.rmq(l, r), "range [{l}, {r}]");
     }
 }

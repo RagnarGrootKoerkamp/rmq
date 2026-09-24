@@ -21,7 +21,7 @@ fn scaling_sparse_table(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::from_parameter(n), &data, |b, data| {
             b.iter_batched(
-                || OffsetSparseTable::new(&data),  // setup, not timed
+                || OffsetSparseTable::new(&data), // setup, not timed
                 |v| {
                     let l = rng.random_range(0..n);
                     let r = rng.random_range(l..n);
@@ -48,7 +48,7 @@ fn scaling_sparse_table(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::from_parameter(n), &data, |b, data| {
             b.iter_batched(
-                || RMQTree::new(&data),  // setup, not timed
+                || RMQTree::new(&data), // setup, not timed
                 |v| {
                     let l = rng.random_range(0..n);
                     let r = rng.random_range(l..n);

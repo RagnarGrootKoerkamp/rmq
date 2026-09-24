@@ -9,7 +9,9 @@ pub trait RMQ<'a, T: Sized> {
 }
 
 pub trait RMQFamily<T> {
-    type Rmq<'a>: RMQ<'a, T> where T: 'a;
+    type Rmq<'a>: RMQ<'a, T>
+    where
+        T: 'a;
 }
 
 pub trait OwningRMQ<T>: for<'a> RMQ<'a, T> {}
@@ -20,6 +22,6 @@ pub trait TwoArgMin {
 
 impl TwoArgMin for &[u64] {
     fn argmin(&self, a: usize, b: usize) -> usize {
-        if self[a] <= self[b] {a} else {b}
+        if self[a] <= self[b] { a } else { b }
     }
 }

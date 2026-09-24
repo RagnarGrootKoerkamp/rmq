@@ -2,7 +2,7 @@ use crate::base::{RMQ, RMQFamily, TwoArgMin};
 
 pub struct RMQTree<'a> {
     n: usize,
-    data: &'a[u64],
+    data: &'a [u64],
     tree: Vec<usize>,
 }
 
@@ -15,8 +15,16 @@ impl<'a> RMQ<'a, u64> for RMQTree<'a> {
             tree: vec![0; n],
         };
         for i in (1..n).rev() {
-            let left_index = if 2*i < n {tree.tree[2*i]} else {2*i-n};
-            let right_index = if 2*i+1 < n {tree.tree[2*i+1]} else {2*i+1-n};
+            let left_index = if 2 * i < n {
+                tree.tree[2 * i]
+            } else {
+                2 * i - n
+            };
+            let right_index = if 2 * i + 1 < n {
+                tree.tree[2 * i + 1]
+            } else {
+                2 * i + 1 - n
+            };
             tree.tree[i] = tree.data.argmin(left_index, right_index);
         }
         tree
@@ -42,7 +50,7 @@ impl<'a> RMQ<'a, u64> for RMQTree<'a> {
                 l += 1;
             }
             if r % 2 == 1 {
-                right_min = self.data.argmin(self.tree[((r - 1))], right_min);
+                right_min = self.data.argmin(self.tree[r - 1], right_min);
                 r -= 1;
             }
             l /= 2;
