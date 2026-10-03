@@ -4,7 +4,7 @@ use std::io::{BufWriter, Write};
 use std::time::Instant;
 
 use rmq::base::{RMQFamily, RMQ};
-use rmq::sparse_table::{IndexSparseTableFamily, SparseTableFamily};
+use rmq::sparse_table::{IndexSparseTableFamily, OffsetSparseTableFamily};
 
 use rand::prelude::*;
 use rand::rngs::Xoshiro256PlusPlus;
@@ -132,9 +132,8 @@ fn main() -> std::io::Result<()> {
     for i in 30..=70 {
         let n = 10f64.powf(i as f64 / 10.0).round() as usize;
         for res in [
-            run_benchmarks::<SparseTableFamily>(n),
-            run_benchmarks::<IndexSparseTableFamily>(n),
-            run_benchmarks::<SparseTableOnBlocksFamily>(n)
+            run_benchmarks::<OffsetSparseTableFamily>(n),
+            run_benchmarks::<IndexSparseTableFamily>(n)
         ] {
             serde_json::to_writer(&mut out, &res)?;
             out.write_all(b"\n")?;
