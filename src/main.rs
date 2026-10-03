@@ -4,11 +4,12 @@ use std::io::{BufWriter, Write};
 use std::time::Instant;
 
 use rmq::base::{RMQFamily, RMQ};
-use rmq::sparse_table::SparseTableFamily;
+use rmq::sparse_table::{IndexSparseTableFamily, SparseTableFamily};
 
 use rand::prelude::*;
 use rand::rngs::Xoshiro256PlusPlus;
 use rand::seq::SliceRandom;
+use rmq::sparse_table2::{SparseTableOnBlocksFamily};
 use serde::Serialize;
 
 fn get_rng() -> Xoshiro256PlusPlus {
@@ -59,6 +60,12 @@ where
     F: FnMut(T) -> R,
     G: FnMut() -> T
 {
+    let start = Instant::now();
+    // BUG: F is called non-determinstic times
+    while start.elapsed().as_millis() < 100 {
+        black_box(f(input_generator()));
+    }
+
     let mut remaining = repetitions + batch_size;
 
     let mut durations: Vec<f64> = Vec::with_capacity(remaining);
@@ -101,7 +108,7 @@ fn run_benchmarks<F: RMQFamily<u64>>(n: usize) -> BenchmarkResult {
 
     let query_time = time_function(|(l, r)| {
         black_box(rmq.rmq(black_box(l), black_box(r)));
-    }, 100000, 1000, || {sample_range(&mut rng, n)});
+    }, 100_000, 1000, || {sample_range(&mut rng, n)});
 
     BenchmarkResult { name: std::any::type_name::<F>().to_string(), n, build_time, query_time }
 }
@@ -124,11 +131,14 @@ fn main() -> std::io::Result<()> {
     // Tenth-of-a-decade steps: 1000, 1259, 1585, ..., 10_000_000
     for i in 30..=70 {
         let n = 10f64.powf(i as f64 / 10.0).round() as usize;
-        let res = run_benchmarks::<SparseTableFamily>(n);
-        println!("{:?}", res);
-
-        serde_json::to_writer(&mut out, &res)?;
-        out.write_all(b"\n")?;
+        for res in [
+            run_benchmarks::<SparseTableFamily>(n),
+            run_benchmarks::<IndexSparseTableFamily>(n),
+            run_benchmarks::<SparseTableOnBlocksFamily>(n)
+        ] {
+            serde_json::to_writer(&mut out, &res)?;
+            out.write_all(b"\n")?;
+        }        
         out.flush()?; // keep finished results if a later run crashes
     }
     Ok(())
