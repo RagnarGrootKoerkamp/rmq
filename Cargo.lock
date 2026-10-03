@@ -463,6 +463,8 @@ dependencies = [
  "criterion",
  "rand",
  "rmq",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
