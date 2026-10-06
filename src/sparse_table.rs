@@ -3,7 +3,7 @@ use crate::{
     packed_vec::PackedVec,
 };
 
-pub struct OffsetSparseTable<'a> {
+pub struct OffsetSparseTable<'a, const S: usize> {
     n: usize,
     k_max: usize,
     data: &'a [u64],
@@ -11,7 +11,7 @@ pub struct OffsetSparseTable<'a> {
     offsets: Vec<PackedVec>,
 }
 
-impl<'a> RMQ<'a, u64> for OffsetSparseTable<'a> {
+impl<'a, const S: usize> RMQ<'a, u64> for OffsetSparseTable<'a, S> {
     fn new(data: &'a [u64]) -> Self {
         let n = data.len();
         let k_max = n.ilog2() as usize;
@@ -55,8 +55,8 @@ impl<'a> RMQ<'a, u64> for OffsetSparseTable<'a> {
         }
 
         let k = (r - l + 1).ilog2() as usize;
-        let left_index = self.offsets[k-1].get(l) as usize + l;
-        let right_index = self.offsets[k-1].get(r + 1 - (1 << k)) as usize + r + 1 - (1 << k);
+        let left_index = self.offsets[k - 1].get(l) as usize + l;
+        let right_index = self.offsets[k - 1].get(r + 1 - (1 << k)) as usize + r + 1 - (1 << k);
 
         self.data.argmin(left_index, right_index)
     }
@@ -64,10 +64,10 @@ impl<'a> RMQ<'a, u64> for OffsetSparseTable<'a> {
 
 /// Family type for [`OffsetSparseTable`]. Never instantiated; it exists only so
 /// generic code can name the structure without committing to an input lifetime.
-pub struct OffsetSparseTableFamily;
+pub struct OffsetSparseTableFamily<const S: usize>;
 
-impl RMQFamily<u64> for OffsetSparseTableFamily {
-    type Rmq<'a> = OffsetSparseTable<'a>;
+impl<const S: usize> RMQFamily<u64> for OffsetSparseTableFamily<S> {
+    type Rmq<'a> = OffsetSparseTable<'a, S>;
 }
 
 pub struct IndexSparseTable<'a> {

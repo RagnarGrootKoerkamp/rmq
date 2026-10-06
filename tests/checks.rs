@@ -5,7 +5,7 @@ use rmq::{
     sparse_table2::SparseTableOnBlocksFamily,
 };
 
-rmq_conformance!(sparse_table, OffsetSparseTableFamily);
+rmq_conformance!(sparse_table, OffsetSparseTableFamily<1>);
 rmq_conformance!(rmq_tree, RMQTreeFamily);
 rmq_conformance!(index_sparse_table, IndexSparseTableFamily);
 rmq_conformance!(sparse_table_on_blocks, SparseTableOnBlocksFamily);
@@ -14,7 +14,9 @@ rmq_conformance!(sparse_table_on_blocks, SparseTableOnBlocksFamily);
 fn sparse_table_on_blocks_large_blocks() {
     let mut state = 0x9E3779B97F4A7C15u64;
     let mut next = || {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         state >> 33
     };
     for n in [256, 257, 258, 4095, 4096, 4097, 65536, 65537, 65539] {

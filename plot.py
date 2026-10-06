@@ -2,6 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["matplotlib"]
 # ///
+# AI Generated
 """Plot build and query time against n for each structure in one or more JSONL files.
 
     uv run plot.py                                  # results.jsonl

@@ -13,8 +13,17 @@ impl PackedVec {
         let bits = len * width as usize;
         // One extra word of padding so get/set can always touch words[w + 1].
         let words = vec![0; bits.div_ceil(64) + 1];
-        let mask = if width == 64 { u64::MAX } else { (1 << width) - 1 };
-        Self { words, width, mask, len }
+        let mask = if width == 64 {
+            u64::MAX
+        } else {
+            (1 << width) - 1
+        };
+        Self {
+            words,
+            width,
+            mask,
+            len,
+        }
     }
 
     #[inline]

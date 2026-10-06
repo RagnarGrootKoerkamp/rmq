@@ -24,6 +24,35 @@ The results remain somewhat noisy. Unsurprisingly the IndexSparseTable and Offse
 
 ## Sparse Table improvements
 
-### Bitpacking offsets
+Note: All values for space and time complexity are upper bounds. The actual values can be slightly lower
 
-We can utilize the fact that we are storing offsets and not indices, by storing them in a packed vector instead of always using the full 64 bits to store an offset
+### Standard Sparse table
+
+We precompute $argmin_{x \in [l, r]}(A[x])$ for all segments $[l, r]$ of length $2^k$ ($k \gt 0$).
+There are $log(n)$ different such lengths. Per length we store $n-length \le n$ answers.
+
+Space usage (on top of $A$): $log(n) \cdot n$ words. This can be improved to $log^2(n) \cdot n$ bits with bitpacking.
+
+### Storing relative positions (offsets)
+
+Instead of storing $x$ we can store $d= x-l \lt 2^k$. These offsets can than be packed more tightly since d only needs k bits instead of the full $log(n)$.
+
+Space usage: $\frac{log^2(n)}{2} \cdot n$
+
+### Table over blocks
+
+Any RMQ structure (relying on A) with space usage in $O(f(n))$ and constant queries can be constructed over blocks of A instead leading to space usage $O(f(n/a))$ and queries in $O(a)$ via a linear scan.
+
+Space usage: $log^2(\frac{n}{a})\cdot \frac{n}{a}$
+
+Query time: $a$
+
+### Bitmasks (from Codeforces blogpost)
+
+Instead of a linear scan on the blocks we can store a bitmask at each position.
+
+TODO: Explain
+
+Space usage:   $log(n) \cdot n$
+
+Query time: Constant

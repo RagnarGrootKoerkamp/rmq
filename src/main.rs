@@ -3,13 +3,12 @@ use std::hint::black_box;
 use std::io::{BufWriter, Write};
 use std::time::Instant;
 
-use rmq::base::{RMQFamily, RMQ};
+use rmq::base::{RMQ, RMQFamily};
 use rmq::sparse_table::{IndexSparseTableFamily, OffsetSparseTableFamily};
 
 use rand::prelude::*;
 use rand::rngs::Xoshiro256PlusPlus;
 use rand::seq::SliceRandom;
-use rmq::sparse_table2::{SparseTableOnBlocksFamily};
 use serde::Serialize;
 
 fn get_rng() -> Xoshiro256PlusPlus {
@@ -38,7 +37,6 @@ fn sample_range(rng: &mut dyn Rng, n: usize) -> (usize, usize) {
     (l, r)
 }
 
-
 #[derive(Debug, Serialize)]
 struct DistStatistics {
     mean: f64,
@@ -51,14 +49,18 @@ struct BenchmarkResult {
     name: String,
     n: usize,
     build_time: DistStatistics,
-    query_time: DistStatistics
+    query_time: DistStatistics,
 }
 
-
-fn time_function<T: Copy, R, F, G>(mut f: F, repetitions: usize, batch_size: usize, mut input_generator: G) -> DistStatistics 
+fn time_function<T: Copy, R, F, G>(
+    mut f: F,
+    repetitions: usize,
+    batch_size: usize,
+    mut input_generator: G,
+) -> DistStatistics
 where
     F: FnMut(T) -> R,
-    G: FnMut() -> T
+    G: FnMut() -> T,
 {
     let start = Instant::now();
     // BUG: F is called non-determinstic times
@@ -88,31 +90,48 @@ where
     }
     // Remove warmup batch
     durations.remove(0);
-    
-    let mean = durations.iter().sum::<f64>()/ durations.len() as f64;
-    let std_dev = if durations.len() > 1 { (durations.iter().map(|x| (x-mean).powi(2)).sum::<f64>() / (durations.len() as f64 -1f64)).sqrt() } else {0f64};
+
+    let mean = durations.iter().sum::<f64>() / durations.len() as f64;
+    let std_dev = if durations.len() > 1 {
+        (durations.iter().map(|x| (x - mean).powi(2)).sum::<f64>()
+            / (durations.len() as f64 - 1f64))
+            .sqrt()
+    } else {
+        0f64
+    };
     durations.sort_by(f64::total_cmp);
     let median = durations[durations.len() / 2];
-    DistStatistics { mean, std_dev, median }
+    DistStatistics {
+        mean,
+        std_dev,
+        median,
+    }
 }
 
 fn run_benchmarks<F: RMQFamily<u64>>(n: usize) -> BenchmarkResult {
     let mut rng = get_rng();
     let data = get_random_permutation(&mut rng, n);
 
-    let build_time = time_function(|_| {
-        F::Rmq::new(black_box(&data))
-    }, 5, 1, || {});
+    let build_time = time_function(|_| F::Rmq::new(black_box(&data)), 5, 1, || {});
 
     let rmq = F::Rmq::new(&data);
 
-    let query_time = time_function(|(l, r)| {
-        black_box(rmq.rmq(black_box(l), black_box(r)));
-    }, 100_000, 1000, || {sample_range(&mut rng, n)});
+    let query_time = time_function(
+        |(l, r)| {
+            black_box(rmq.rmq(black_box(l), black_box(r)));
+        },
+        100_000,
+        1000,
+        || sample_range(&mut rng, n),
+    );
 
-    BenchmarkResult { name: std::any::type_name::<F>().to_string(), n, build_time, query_time }
+    BenchmarkResult {
+        name: std::any::type_name::<F>().to_string(),
+        n,
+        build_time,
+        query_time,
+    }
 }
-
 
 #[cfg(target_os = "macos")]
 fn prefer_performance_cores() {
@@ -132,12 +151,12 @@ fn main() -> std::io::Result<()> {
     for i in 30..=70 {
         let n = 10f64.powf(i as f64 / 10.0).round() as usize;
         for res in [
-            run_benchmarks::<OffsetSparseTableFamily>(n),
-            run_benchmarks::<IndexSparseTableFamily>(n)
+            run_benchmarks::<OffsetSparseTableFamily<1>>(n),
+            run_benchmarks::<IndexSparseTableFamily>(n),
         ] {
             serde_json::to_writer(&mut out, &res)?;
             out.write_all(b"\n")?;
-        }        
+        }
         out.flush()?; // keep finished results if a later run crashes
     }
     Ok(())
