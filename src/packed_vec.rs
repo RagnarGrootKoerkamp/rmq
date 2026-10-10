@@ -8,6 +8,10 @@ pub struct PackedVec {
 }
 
 impl PackedVec {
+    pub fn memory_bytes(&self) -> usize {
+        self.words.len() * std::mem::size_of::<u64>()
+    }
+
     pub fn new(len: usize, width: u32) -> Self {
         assert!((1..=64).contains(&width));
         let bits = len * width as usize;

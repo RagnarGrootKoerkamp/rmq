@@ -1,9 +1,15 @@
-use crate::base::{RMQ, RMQFamily, TwoArgMin};
+use crate::base::{MemoryUsage, RMQ, RMQFamily, TwoArgMin};
 
 pub struct RMQTree<'a> {
     n: usize,
     data: &'a [u64],
     tree: Vec<usize>,
+}
+
+impl<'a> MemoryUsage for RMQTree<'a> {
+    fn memory_bytes(&self) -> usize {
+        std::mem::size_of::<Self>() + self.tree.len() * std::mem::size_of::<usize>()
+    }
 }
 
 impl<'a> RMQ<'a, u64> for RMQTree<'a> {

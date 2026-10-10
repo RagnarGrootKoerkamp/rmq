@@ -3,7 +3,7 @@ use std::hint::black_box;
 use std::io::{BufWriter, Write};
 use std::time::Instant;
 
-use rmq::base::{RMQ, RMQFamily};
+use rmq::base::{MemoryUsage, RMQ, RMQFamily};
 use rmq::sparse_table::{IndexSparseTableFamily, OffsetSparseTableFamily};
 
 use rand::prelude::*;
@@ -50,6 +50,7 @@ struct BenchmarkResult {
     n: usize,
     build_time: DistStatistics,
     query_time: DistStatistics,
+    memory_bytes: usize,
 }
 
 fn time_function<T: Copy, R, F, G>(
@@ -108,9 +109,20 @@ where
     }
 }
 
-fn run_benchmarks<F: RMQFamily<u64>>(n: usize) -> BenchmarkResult {
+/// Each family is benchmarked until its structure would exceed this many bytes.
+const MEMORY_THRESHOLD_BYTES: usize = 1 << 30;
+
+/// Returns `None` if the structure built over `n` elements exceeds the memory threshold.
+fn run_benchmarks<F: RMQFamily<u64>>(n: usize) -> Option<BenchmarkResult> {
     let mut rng = get_rng();
     let data = get_random_permutation(&mut rng, n);
+
+    let rmq = F::Rmq::new(&data);
+    let memory_bytes = rmq.memory_bytes();
+    if memory_bytes > MEMORY_THRESHOLD_BYTES {
+        return None;
+    }
+    drop(rmq);
 
     let build_time = time_function(|_| F::Rmq::new(black_box(&data)), 5, 1, || {});
 
@@ -125,12 +137,13 @@ fn run_benchmarks<F: RMQFamily<u64>>(n: usize) -> BenchmarkResult {
         || sample_range(&mut rng, n),
     );
 
-    BenchmarkResult {
+    Some(BenchmarkResult {
         name: std::any::type_name::<F>().to_string(),
         n,
         build_time,
         query_time,
-    }
+        memory_bytes,
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -142,22 +155,26 @@ fn prefer_performance_cores() {
     unsafe { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) };
 }
 
+fn run_family<F: RMQFamily<u64>>(out: &mut impl Write) -> std::io::Result<()> {
+    // Tenth-of-a-decade steps: 1000, 1259, 1585, ...
+    for i in 30.. {
+        let n = 10f64.powf(i as f64 / 10.0).round() as usize;
+        let Some(res) = run_benchmarks::<F>(n) else {
+            break;
+        };
+        serde_json::to_writer(&mut *out, &res)?;
+        out.write_all(b"\n")?;
+        out.flush()?; // keep finished results if a later run crashes
+    }
+    Ok(())
+}
+
 fn main() -> std::io::Result<()> {
     prefer_performance_cores();
 
     let mut out = BufWriter::new(File::create("results.jsonl")?);
 
-    // Tenth-of-a-decade steps: 1000, 1259, 1585, ..., 10_000_000
-    for i in 30..=70 {
-        let n = 10f64.powf(i as f64 / 10.0).round() as usize;
-        for res in [
-            run_benchmarks::<OffsetSparseTableFamily<1>>(n),
-            run_benchmarks::<IndexSparseTableFamily>(n),
-        ] {
-            serde_json::to_writer(&mut out, &res)?;
-            out.write_all(b"\n")?;
-        }
-        out.flush()?; // keep finished results if a later run crashes
-    }
+    run_family::<OffsetSparseTableFamily>(&mut out)?;
+    run_family::<IndexSparseTableFamily>(&mut out)?;
     Ok(())
 }

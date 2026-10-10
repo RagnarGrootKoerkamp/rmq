@@ -1,11 +1,8 @@
 use rmq::{
-    rmq_conformance,
-    rmq_tree::RMQTreeFamily,
-    sparse_table::{IndexSparseTableFamily, OffsetSparseTableFamily},
-    sparse_table2::SparseTableOnBlocksFamily,
+    rmq_conformance, rmq_tree::RMQTreeFamily, sparse_table::{IndexSparseTableFamily, OffsetSparseTableFamily}, sparse_table2::SparseTableOnBlocksFamily,
 };
 
-rmq_conformance!(sparse_table, OffsetSparseTableFamily<1>);
+rmq_conformance!(sparse_table, OffsetSparseTableFamily);
 rmq_conformance!(rmq_tree, RMQTreeFamily);
 rmq_conformance!(index_sparse_table, IndexSparseTableFamily);
 rmq_conformance!(sparse_table_on_blocks, SparseTableOnBlocksFamily);

@@ -9,7 +9,7 @@ pub trait RMQ<'a, T: Sized> {
 }
 
 pub trait RMQFamily<T> {
-    type Rmq<'a>: RMQ<'a, T>
+    type Rmq<'a>: RMQ<'a, T> + MemoryUsage
     where
         T: 'a;
 }
@@ -24,4 +24,9 @@ impl TwoArgMin for &[u64] {
     fn argmin(&self, a: usize, b: usize) -> usize {
         if self[a] <= self[b] { a } else { b }
     }
+}
+
+pub trait MemoryUsage {
+    /// Bytes used by this structure, excluding the borrowed input data.
+    fn memory_bytes(&self) -> usize;
 }

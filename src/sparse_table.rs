@@ -1,9 +1,8 @@
 use crate::{
-    base::{RMQ, RMQFamily, TwoArgMin},
-    packed_vec::PackedVec,
+    base::{MemoryUsage, RMQ, RMQFamily, TwoArgMin}, packed_vec::PackedVec,
 };
 
-pub struct OffsetSparseTable<'a, const S: usize> {
+pub struct OffsetSparseTable<'a> {
     n: usize,
     k_max: usize,
     data: &'a [u64],
@@ -11,7 +10,15 @@ pub struct OffsetSparseTable<'a, const S: usize> {
     offsets: Vec<PackedVec>,
 }
 
-impl<'a, const S: usize> RMQ<'a, u64> for OffsetSparseTable<'a, S> {
+impl<'a> MemoryUsage for OffsetSparseTable<'a> {
+    fn memory_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.offsets.len() * std::mem::size_of::<PackedVec>()
+            + self.offsets.iter().map(|o| o.memory_bytes()).sum::<usize>()
+    }
+}
+
+impl<'a> RMQ<'a, u64> for OffsetSparseTable<'a> {
     fn new(data: &'a [u64]) -> Self {
         let n = data.len();
         let k_max = n.ilog2() as usize;
@@ -64,10 +71,10 @@ impl<'a, const S: usize> RMQ<'a, u64> for OffsetSparseTable<'a, S> {
 
 /// Family type for [`OffsetSparseTable`]. Never instantiated; it exists only so
 /// generic code can name the structure without committing to an input lifetime.
-pub struct OffsetSparseTableFamily<const S: usize>;
+pub struct OffsetSparseTableFamily;
 
-impl<const S: usize> RMQFamily<u64> for OffsetSparseTableFamily<S> {
-    type Rmq<'a> = OffsetSparseTable<'a, S>;
+impl RMQFamily<u64> for OffsetSparseTableFamily {
+    type Rmq<'a> = OffsetSparseTable<'a>;
 }
 
 pub struct IndexSparseTable<'a> {
@@ -99,6 +106,12 @@ impl<'a> IndexSparseTable<'a> {
             }
         }
         table
+    }
+}
+
+impl<'a> MemoryUsage for IndexSparseTable<'a> {
+    fn memory_bytes(&self) -> usize {
+        std::mem::size_of::<Self>() + self.indices.len() * std::mem::size_of::<usize>()
     }
 }
 

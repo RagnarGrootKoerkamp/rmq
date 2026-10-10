@@ -1,6 +1,12 @@
-use crate::base::{RMQ, RMQFamily};
+use crate::base::{MemoryUsage, RMQ, RMQFamily};
 
 pub struct NaiveRMQ<'a, T: Ord>(&'a [T]);
+
+impl<'a, T: Ord> MemoryUsage for NaiveRMQ<'a, T> {
+    fn memory_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+    }
+}
 
 impl<'a, T: Ord> RMQ<'a, T> for NaiveRMQ<'a, T> {
     fn new(data: &'a [T]) -> Self {

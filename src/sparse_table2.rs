@@ -1,10 +1,10 @@
 use crate::{
-    base::{RMQ, RMQFamily, TwoArgMin},
+    base::{MemoryUsage, RMQ, RMQFamily, TwoArgMin},
     cartesian_tree::cartesian_tree_identifier,
     sparse_table::IndexSparseTable,
 };
 
-pub struct SparseTableOnBlocks<'a> {
+pub struct SparseTableCartesianBlocks<'a> {
     b: usize,
     data: &'a [u64],
     block_id: Vec<usize>,
@@ -18,14 +18,23 @@ fn _range_index(l: usize, r: usize) -> usize {
     r * (r + 1) / 2 + l
 }
 
-impl<'a> SparseTableOnBlocks<'a> {
+impl<'a> SparseTableCartesianBlocks<'a> {
     #[inline]
     fn in_block(&self, block: usize, l: usize, r: usize) -> usize {
         block * self.b + self.block_responses[self.block_id[block] + _range_index(l, r)]
     }
 }
 
-impl<'a> RMQ<'a, u64> for SparseTableOnBlocks<'a> {
+impl<'a> MemoryUsage for SparseTableCartesianBlocks<'a> {
+    fn memory_bytes(&self) -> usize {
+        // The nested table's own struct size is already part of size_of::<Self>().
+        std::mem::size_of::<Self>() - std::mem::size_of::<IndexSparseTable>()
+            + (self.block_id.len() + self.block_responses.len()) * std::mem::size_of::<usize>()
+            + self.block_sparse_table.memory_bytes()
+    }
+}
+
+impl<'a> RMQ<'a, u64> for SparseTableCartesianBlocks<'a> {
     fn new(data: &'a [u64]) -> Self
     where
         Self: Sized,
@@ -61,7 +70,7 @@ impl<'a> RMQ<'a, u64> for SparseTableOnBlocks<'a> {
             block_id.push(id_map[id]);
             indices.push(i + block_responses[id_map[id] + _range_index(0, end - 1 - i)]);
         }
-        SparseTableOnBlocks {
+        SparseTableCartesianBlocks {
             b,
             data,
             block_id,
@@ -91,5 +100,5 @@ impl<'a> RMQ<'a, u64> for SparseTableOnBlocks<'a> {
 pub struct SparseTableOnBlocksFamily;
 
 impl RMQFamily<u64> for SparseTableOnBlocksFamily {
-    type Rmq<'a> = SparseTableOnBlocks<'a>;
+    type Rmq<'a> = SparseTableCartesianBlocks<'a>;
 }

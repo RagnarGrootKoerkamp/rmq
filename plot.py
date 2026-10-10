@@ -3,7 +3,7 @@
 # dependencies = ["matplotlib"]
 # ///
 # AI Generated
-"""Plot build and query time against n for each structure in one or more JSONL files.
+"""Plot build time, query time and memory against n for each structure in one or more JSONL files.
 
     uv run plot.py                                  # results.jsonl
     uv run plot.py --stat median                    # plot medians instead of means
@@ -28,7 +28,7 @@ parser.add_argument("--stat", choices=["mean", "median"], default="mean")
 parser.add_argument("-o", "--output", default="results.png")
 args = parser.parse_args()
 
-# (structure, file) -> [(n, build, build_std, query, query_std)]
+# (structure, file) -> [(n, build, build_std, query, query_std, memory)]
 series = defaultdict(list)
 for path in args.files:
     with open(path) as f:
@@ -40,6 +40,7 @@ for path in args.files:
                     r["n"],
                     r["build_time"][args.stat], r["build_time"]["std_dev"],
                     r["query_time"][args.stat], r["query_time"]["std_dev"],
+                    r["memory_bytes"],
                 )
             )
 
@@ -48,8 +49,8 @@ color_of = {name: COLORS[i % len(COLORS)] for i, name in enumerate(names)}
 style_of = {path: LINESTYLES[i % len(LINESTYLES)] for i, path in enumerate(args.files)}
 multi_file = len(args.files) > 1
 
-fig, (ax_build, ax_query) = plt.subplots(1, 2, figsize=(12, 5))
-bands = {ax_build: [], ax_query: []}  # drawn after the lines, so they don't set the y-range
+fig, (ax_build, ax_query, ax_mem) = plt.subplots(1, 3, figsize=(18, 5))
+bands = {ax_build: [], ax_query: [], ax_mem: []}  # drawn after the lines, so they don't set the y-range
 for (name, path), rows in sorted(series.items()):
     rows.sort()
     ns = [r[0] for r in rows]
@@ -59,13 +60,19 @@ for (name, path), rows in sorted(series.items()):
         ys = [r[col] * scale for r in rows]
         ax.plot(ns, ys, **style)
         bands[ax].append((ns, ys, [r[col + 1] * scale for r in rows], color_of[name]))
+    # Memory in units of the 8-byte u64 input: 1.0 means as large as the input array.
+    ax_mem.plot(ns, [r[5] / (8 * r[0]) for r in rows], **style)
 
-for ax, title, unit in [(ax_build, "Build time", "ms"), (ax_query, "Query time", "ns / query")]:
+for ax, title, ylabel in [
+    (ax_build, "Build time", f"{args.stat} ± std dev (ms)"),
+    (ax_query, "Query time", f"{args.stat} ± std dev (ns / query)"),
+    (ax_mem, "Memory", "bytes / (8 n)"),
+]:
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_title(title)
     ax.set_xlabel("n")
-    ax.set_ylabel(f"{args.stat} ± std dev ({unit})")
+    ax.set_ylabel(ylabel)
     lo, hi = ax.get_ylim()
     # Shaded band: stat ± std_dev. On a log axis the lower edge can be <= 0, so clip it
     # to the bottom of the plot; a band touching the bottom means "spread >= the value".
