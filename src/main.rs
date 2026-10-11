@@ -4,11 +4,15 @@ use std::io::{BufWriter, Write};
 use std::time::Instant;
 
 use rmq::base::{MemoryUsage, RMQ, RMQFamily};
-use rmq::sparse_table::{IndexSparseTableFamily, OffsetSparseTableFamily};
+use rmq::bit_blocks::BitBlocksSparseTableFamily;
+use rmq::sparse_table::{
+    IndexSparseTableFamily, OffsetSparseTableFamily, PackedIndexSparseTableFamily,
+};
 
 use rand::prelude::*;
 use rand::rngs::Xoshiro256PlusPlus;
 use rand::seq::SliceRandom;
+use rmq::sparse_table2::SparseTableOnBlocksFamily;
 use serde::Serialize;
 
 fn get_rng() -> Xoshiro256PlusPlus {
@@ -50,6 +54,7 @@ struct BenchmarkResult {
     n: usize,
     build_time: DistStatistics,
     query_time: DistStatistics,
+    query_latency: DistStatistics,
     memory_bytes: usize,
 }
 
@@ -124,17 +129,35 @@ fn run_benchmarks<F: RMQFamily<u64>>(n: usize) -> Option<BenchmarkResult> {
     }
     drop(rmq);
 
-    let build_time = time_function(|_| F::Rmq::new(black_box(&data)), 5, 1, || {});
+    let build_time = time_function(|_| F::Rmq::new(black_box(&data)), 1, 1, || {});
 
     let rmq = F::Rmq::new(&data);
 
+    // Independent queries: the CPU overlaps their cache misses, so this measures throughput.
+    let mut query_rng = get_rng();
     let query_time = time_function(
         |(l, r)| {
             black_box(rmq.rmq(black_box(l), black_box(r)));
         },
         100_000,
         1000,
-        || sample_range(&mut rng, n),
+        || sample_range(&mut query_rng, n),
+    );
+
+    // Each query's bounds depend on the previous result (`prev & zero` is always 0, but neither
+    // the compiler nor the CPU knows that), so queries run one at a time: this measures latency.
+    let zero = black_box(0usize);
+    let mut prev = 0usize;
+    let mut query_rng = get_rng();
+    let query_latency = time_function(
+        |(l, r)| {
+            let d = prev & zero;
+            prev = rmq.rmq(l + d, r + d);
+            prev
+        },
+        1_000_000,
+        1000,
+        || sample_range(&mut query_rng, n),
     );
 
     Some(BenchmarkResult {
@@ -142,6 +165,7 @@ fn run_benchmarks<F: RMQFamily<u64>>(n: usize) -> Option<BenchmarkResult> {
         n,
         build_time,
         query_time,
+        query_latency,
         memory_bytes,
     })
 }
@@ -174,7 +198,10 @@ fn main() -> std::io::Result<()> {
 
     let mut out = BufWriter::new(File::create("results.jsonl")?);
 
-    run_family::<OffsetSparseTableFamily>(&mut out)?;
     run_family::<IndexSparseTableFamily>(&mut out)?;
+    run_family::<PackedIndexSparseTableFamily>(&mut out)?;
+    run_family::<OffsetSparseTableFamily>(&mut out)?;
+    run_family::<BitBlocksSparseTableFamily>(&mut out)?;
+    run_family::<SparseTableOnBlocksFamily>(&mut out)?;
     Ok(())
 }

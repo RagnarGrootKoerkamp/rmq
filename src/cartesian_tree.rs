@@ -1,8 +1,8 @@
-pub fn cartesian_tree_identifier(block: &[u64], width: usize) -> u64 {
-    let mut stack: Vec<u64> = Vec::with_capacity(width);
+pub fn cartesian_tree_identifier<T: Ord>(block: &[T], width: usize) -> u64 {
+    let mut stack: Vec<&T> = Vec::with_capacity(width);
     let mut id = 0u64;
     let mut bits = 0u32;
-    for &x in block {
+    for x in block {
         while let Some(&top) = stack.last() {
             if top <= x {
                 break;

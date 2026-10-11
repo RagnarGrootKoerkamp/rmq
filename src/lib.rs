@@ -1,6 +1,7 @@
 extern crate rand;
 
 pub mod base;
+pub mod bit_blocks;
 pub mod cartesian_tree;
 pub mod naive;
 pub mod packed_vec;

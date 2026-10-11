@@ -1,4 +1,4 @@
-use crate::base::{MemoryUsage, RMQ, RMQFamily};
+use crate::base::{MemoryUsage, RMQ};
 
 pub struct NaiveRMQ<'a, T: Ord>(&'a [T]);
 
@@ -23,13 +23,6 @@ impl<'a, T: Ord> RMQ<'a, T> for NaiveRMQ<'a, T> {
     }
 }
 
-/// Family type for [`NaiveRMQ`]. Never instantiated; it exists only so generic
-/// code can name the structure without committing to an input lifetime.
-pub struct NaiveRMQFamily;
-
-impl<T: Ord> RMQFamily<T> for NaiveRMQFamily {
-    type Rmq<'a>
-        = NaiveRMQ<'a, T>
-    where
-        T: 'a;
+crate::rmq_family! {
+    pub NaiveRMQFamily => NaiveRMQ
 }

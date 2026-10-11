@@ -77,6 +77,18 @@ pub fn test_random_with_ties<F: RMQFamily<u64>>() {
     }
 }
 
+// Sizes around power-of-two and block boundaries, with and without heavy ties.
+pub fn test_large_sizes<F: RMQFamily<u64>>() {
+    let mut rng = get_rng();
+    for n in [
+        63, 64, 65, 127, 128, 129, 256, 257, 258, 4095, 4096, 4097, 65536, 65537, 65539,
+    ] {
+        for distinct in [3, u64::MAX] {
+            compare_with_naive::<F>(&get_random_with_replace(&mut rng, n, distinct));
+        }
+    }
+}
+
 pub fn test_edge_ranges<F: RMQFamily<u64>>() {
     let data = get_random_permutation(&mut get_rng(), 100);
     let naive = NaiveRMQ::new(&data);
@@ -115,6 +127,11 @@ macro_rules! rmq_conformance {
             #[test]
             fn random_with_ties() {
                 $crate::testing::test_random_with_ties::<$family>();
+            }
+
+            #[test]
+            fn large_sizes() {
+                $crate::testing::test_large_sizes::<$family>();
             }
 
             #[test]

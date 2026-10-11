@@ -1,19 +1,19 @@
-use crate::base::{MemoryUsage, RMQ, RMQFamily, TwoArgMin};
+use crate::base::{MemoryUsage, RMQ, TwoArgMin};
 
-pub struct RMQTree<'a> {
+pub struct RMQTree<'a, T> {
     n: usize,
-    data: &'a [u64],
+    data: &'a [T],
     tree: Vec<usize>,
 }
 
-impl<'a> MemoryUsage for RMQTree<'a> {
+impl<'a, T> MemoryUsage for RMQTree<'a, T> {
     fn memory_bytes(&self) -> usize {
         std::mem::size_of::<Self>() + self.tree.len() * std::mem::size_of::<usize>()
     }
 }
 
-impl<'a> RMQ<'a, u64> for RMQTree<'a> {
-    fn new(data: &'a [u64]) -> Self {
+impl<'a, T: Ord> RMQ<'a, T> for RMQTree<'a, T> {
+    fn new(data: &'a [T]) -> Self {
         let n = data.len();
         let mut tree = Self {
             n,
@@ -66,10 +66,6 @@ impl<'a> RMQ<'a, u64> for RMQTree<'a> {
     }
 }
 
-/// Family type for [`RMQTree`]. Never instantiated; it exists only so generic
-/// code can name the structure without committing to an input lifetime.
-pub struct RMQTreeFamily;
-
-impl RMQFamily<u64> for RMQTreeFamily {
-    type Rmq<'a> = RMQTree<'a>;
+crate::rmq_family! {
+    pub RMQTreeFamily => RMQTree
 }

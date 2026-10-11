@@ -3,7 +3,8 @@
 # dependencies = ["matplotlib"]
 # ///
 # AI Generated
-"""Plot build time, query time and memory against n for each structure in one or more JSONL files.
+"""Plot build time, memory, query throughput time and query latency against n for each structure
+in one or more JSONL files.
 
     uv run plot.py                                  # results.jsonl
     uv run plot.py --stat median                    # plot medians instead of means
@@ -28,12 +29,14 @@ parser.add_argument("--stat", choices=["mean", "median"], default="mean")
 parser.add_argument("-o", "--output", default="results.png")
 args = parser.parse_args()
 
-# (structure, file) -> [(n, build, build_std, query, query_std, memory)]
+# (structure, file) -> [(n, build, build_std, query, query_std, memory, latency, latency_std)]
+# latency is None for results written before query_latency existed.
 series = defaultdict(list)
 for path in args.files:
     with open(path) as f:
         for line in f:
             r = json.loads(line)
+            lat = r.get("query_latency")
             name = r["name"].rsplit("::", 1)[-1].removesuffix("Family")
             series[(name, path)].append(
                 (
@@ -41,6 +44,7 @@ for path in args.files:
                     r["build_time"][args.stat], r["build_time"]["std_dev"],
                     r["query_time"][args.stat], r["query_time"]["std_dev"],
                     r["memory_bytes"],
+                    lat and lat[args.stat], lat and lat["std_dev"],
                 )
             )
 
@@ -49,8 +53,9 @@ color_of = {name: COLORS[i % len(COLORS)] for i, name in enumerate(names)}
 style_of = {path: LINESTYLES[i % len(LINESTYLES)] for i, path in enumerate(args.files)}
 multi_file = len(args.files) > 1
 
-fig, (ax_build, ax_query, ax_mem) = plt.subplots(1, 3, figsize=(18, 5))
-bands = {ax_build: [], ax_query: [], ax_mem: []}  # drawn after the lines, so they don't set the y-range
+fig, ((ax_build, ax_mem), (ax_query, ax_lat)) = plt.subplots(2, 2, figsize=(14, 10))
+ax_lat.sharey(ax_query)  # same scale, so the throughput/latency gap reads directly
+bands = {ax_build: [], ax_query: [], ax_mem: [], ax_lat: []}  # drawn after the lines, so they don't set the y-range
 for (name, path), rows in sorted(series.items()):
     rows.sort()
     ns = [r[0] for r in rows]
@@ -60,13 +65,19 @@ for (name, path), rows in sorted(series.items()):
         ys = [r[col] * scale for r in rows]
         ax.plot(ns, ys, **style)
         bands[ax].append((ns, ys, [r[col + 1] * scale for r in rows], color_of[name]))
-    # Memory in units of the 8-byte u64 input: 1.0 means as large as the input array.
-    ax_mem.plot(ns, [r[5] / (8 * r[0]) for r in rows], **style)
+    lat_rows = [r for r in rows if r[6] is not None]
+    if lat_rows:
+        lat_ns = [r[0] for r in lat_rows]
+        ys = [r[6] * 1e9 for r in lat_rows]
+        ax_lat.plot(lat_ns, ys, **style)
+        bands[ax_lat].append((lat_ns, ys, [r[7] * 1e9 for r in lat_rows], color_of[name]))
+    ax_mem.plot(ns, [r[5] * 8 / r[0] for r in rows], **style)
 
 for ax, title, ylabel in [
     (ax_build, "Build time", f"{args.stat} ± std dev (ms)"),
-    (ax_query, "Query time", f"{args.stat} ± std dev (ns / query)"),
-    (ax_mem, "Memory", "bytes / (8 n)"),
+    (ax_mem, "Memory", "bits / element"),
+    (ax_query, "Query time (independent queries)", f"{args.stat} ± std dev (ns / query)"),
+    (ax_lat, "Query latency (dependent chain)", f"{args.stat} ± std dev (ns / query)"),
 ]:
     ax.set_xscale("log")
     ax.set_yscale("log")
