@@ -1,3 +1,5 @@
+use std::{marker::PhantomData, mem::MaybeUninit};
+
 use crate::{
     base::{MemoryUsage, RMQ, TwoArgMin},
     packed_vec::PackedVec,
@@ -199,4 +201,145 @@ impl<'a, T: Ord> RMQ<'a, T> for PackedIndexSparseTable<'a, T> {
 
 crate::rmq_family! {
     pub PackedIndexSparseTableFamily => PackedIndexSparseTable
+}
+
+pub struct ValueSparseTable<'a, T> {
+    n: usize,
+    k_max: usize,
+    entries: Vec<MaybeUninit<(usize, T)>>,
+    _marker: PhantomData<&'a T>
+}
+
+impl<'a, T: Ord + Copy> ValueSparseTable<'a, T> {
+    pub fn new(data: &'a [T], indices: &[usize]) -> Self {
+        let n = indices.len();
+        let k_max = n.ilog2() as usize;
+        let mut table = Self {
+            n,
+            k_max,
+            entries: vec![MaybeUninit::uninit(); (k_max + 1) * n],
+            _marker: PhantomData
+        };
+
+        for i in 0..n {
+            table.entries[i].write((indices[i], data[indices[i]]));
+        }
+        for k in 1..=table.k_max {
+            for i in 0..table.n + 1 - (1 << k) {
+                let lentry = unsafe { table.entries[(k - 1) * table.n + i].assume_init() };
+                let rentry = unsafe { table.entries[(k - 1) * table.n + i + (1 << (k - 1))].assume_init() };
+                table.entries[k * n + i].write(if rentry.1 < lentry.1 {
+                    rentry
+                } else {
+                    lentry
+                });
+            }
+        }
+        table
+    }
+}
+
+impl<'a, T> MemoryUsage for ValueSparseTable<'a, T> {
+    fn memory_bytes(&self) -> usize {
+        std::mem::size_of::<Self>() + self.entries.len() * std::mem::size_of::<MaybeUninit<(usize, T)>>()
+    }
+}
+
+impl<'a, T: Ord + Copy> RMQ<'a, T> for ValueSparseTable<'a, T> {
+    fn new(data: &'a [T]) -> Self
+    where
+        Self: Sized,
+    {
+        let indices: Vec<usize> = (0..data.len()).collect();
+        ValueSparseTable::new(data, &indices)
+    }
+
+    // Queries [l, r]
+    fn rmq(&self, l: usize, r: usize) -> usize {
+        let k = (r - l + 1).ilog2() as usize;
+        let left_entry = unsafe { self.entries[k * self.n + l] .assume_init() };
+        let right_entry = unsafe { self.entries[k * self.n + r + 1 - (1 << k)].assume_init() };
+
+        if right_entry.1 < left_entry.1 {
+            right_entry.0
+        } else {
+            left_entry.0
+        }
+    }
+}
+
+crate::rmq_family! {
+    pub ValueSparseTableFamily => ValueSparseTable where T: Ord + Copy
+}
+
+/// Packs each entry as `(value << index_bits) | index` into a `u128`, so the minimum entry is
+/// the integer minimum and ties resolve to the leftmost index. Field widths are taken from the
+/// largest value and index present, and entries are stored at exactly that width.
+pub struct PackedValueSparseTable<'a, T> {
+    n: usize,
+    k_max: usize,
+    index_bits: u32,
+    entries: PackedVec,
+    _marker: PhantomData<&'a T>,
+}
+
+impl<'a, T: Copy + Into<u64>> PackedValueSparseTable<'a, T> {
+    pub fn new(data: &'a [T], indices: &[usize]) -> Self {
+        let n = indices.len();
+        let k_max = n.ilog2() as usize;
+        let bits = |x: u64| u64::BITS - x.leading_zeros();
+        let index_bits = bits(indices.iter().copied().max().unwrap_or(0) as u64);
+        let value_bits = bits(indices.iter().map(|&i| data[i].into()).max().unwrap_or(0));
+        let mut table = Self {
+            n,
+            k_max,
+            index_bits,
+            entries: PackedVec::new((k_max + 1) * n, (index_bits + value_bits).max(1)),
+            _marker: PhantomData,
+        };
+
+        for i in 0..n {
+            let value: u64 = data[indices[i]].into();
+            table
+                .entries
+                .set_u128(i, (value as u128) << index_bits | indices[i] as u128);
+        }
+        for k in 1..=table.k_max {
+            for i in 0..table.n + 1 - (1 << k) {
+                let lentry = table.entries.get_u128((k - 1) * table.n + i);
+                let rentry = table.entries.get_u128((k - 1) * table.n + i + (1 << (k - 1)));
+                table.entries.set_u128(k * n + i, lentry.min(rentry));
+            }
+        }
+        table
+    }
+}
+
+impl<'a, T> MemoryUsage for PackedValueSparseTable<'a, T> {
+    fn memory_bytes(&self) -> usize {
+        std::mem::size_of::<Self>() + self.entries.memory_bytes()
+    }
+}
+
+impl<'a, T: Copy + Into<u64>> RMQ<'a, T> for PackedValueSparseTable<'a, T> {
+    fn new(data: &'a [T]) -> Self
+    where
+        Self: Sized,
+    {
+        let indices: Vec<usize> = (0..data.len()).collect();
+        PackedValueSparseTable::new(data, &indices)
+    }
+
+    // Queries [l, r]
+    fn rmq(&self, l: usize, r: usize) -> usize {
+        let k = (r - l + 1).ilog2() as usize;
+        let left_entry = self.entries.get_u128(k * self.n + l);
+        let right_entry = self.entries.get_u128(k * self.n + r + 1 - (1 << k));
+
+        (left_entry.min(right_entry) & ((1 << self.index_bits) - 1)) as usize
+    }
+}
+
+crate::rmq_family! {
+    pub PackedValueSparseTableFamily => PackedValueSparseTable where T: Copy + Into<u64>
 }

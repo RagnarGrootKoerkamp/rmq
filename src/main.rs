@@ -6,21 +6,31 @@ use std::time::Instant;
 use rmq::base::{MemoryUsage, RMQ, RMQFamily};
 use rmq::bit_blocks::BitBlocksSparseTableFamily;
 use rmq::sparse_table::{
-    IndexSparseTableFamily, OffsetSparseTableFamily, PackedIndexSparseTableFamily,
+    IndexSparseTableFamily, OffsetSparseTableFamily, PackedIndexSparseTableFamily, PackedValueSparseTableFamily, ValueSparseTableFamily,
 };
 
 use rand::prelude::*;
 use rand::rngs::Xoshiro256PlusPlus;
 use rand::seq::SliceRandom;
-use rmq::sparse_table2::SparseTableOnBlocksFamily;
+use rmq::sparse_table2::SparseTableCartesianBlocksFamily;
 use serde::Serialize;
 
 fn get_rng() -> Xoshiro256PlusPlus {
     Xoshiro256PlusPlus::seed_from_u64(42)
 }
 
-fn get_random_permutation(rng: &mut dyn Rng, n: usize) -> Vec<u64> {
-    let mut v: Vec<u64> = (0..n as u64).collect();
+trait RMQValue: Copy + Ord {
+    /// Truncating cast, like `x as Self`.
+    fn from_u64(x: u64) -> Self;
+}
+impl RMQValue for u8 { fn from_u64(x: u64) -> Self { x as u8 } }
+impl RMQValue for u16 { fn from_u64(x: u64) -> Self { x as u16 } }
+impl RMQValue for u32 { fn from_u64(x: u64) -> Self { x as u32 } }
+impl RMQValue for u64 { fn from_u64(x: u64) -> Self { x } }
+
+/// Values wrap around if `n` exceeds `T`'s range, so the result may contain duplicates.
+fn get_random_permutation<T: RMQValue>(rng: &mut dyn Rng, n: usize) -> Vec<T> {
+    let mut v: Vec<T> = (0..n as u64).map(T::from_u64).collect();
     v.shuffle(rng);
     v
 }
@@ -118,7 +128,7 @@ where
 const MEMORY_THRESHOLD_BYTES: usize = 1 << 30;
 
 /// Returns `None` if the structure built over `n` elements exceeds the memory threshold.
-fn run_benchmarks<F: RMQFamily<u64>>(n: usize) -> Option<BenchmarkResult> {
+fn run_benchmarks<T: RMQValue, F: RMQFamily<T>>(n: usize) -> Option<BenchmarkResult> {
     let mut rng = get_rng();
     let data = get_random_permutation(&mut rng, n);
 
@@ -179,11 +189,11 @@ fn prefer_performance_cores() {
     unsafe { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) };
 }
 
-fn run_family<F: RMQFamily<u64>>(out: &mut impl Write) -> std::io::Result<()> {
+fn run_family<T: RMQValue, F: RMQFamily<T>>(out: &mut impl Write) -> std::io::Result<()> {
     // Tenth-of-a-decade steps: 1000, 1259, 1585, ...
-    for i in 30.. {
+    for i in 20.. {
         let n = 10f64.powf(i as f64 / 10.0).round() as usize;
-        let Some(res) = run_benchmarks::<F>(n) else {
+        let Some(res) = run_benchmarks::<T, F>(n) else {
             break;
         };
         serde_json::to_writer(&mut *out, &res)?;
@@ -198,10 +208,16 @@ fn main() -> std::io::Result<()> {
 
     let mut out = BufWriter::new(File::create("results.jsonl")?);
 
-    run_family::<IndexSparseTableFamily>(&mut out)?;
-    run_family::<PackedIndexSparseTableFamily>(&mut out)?;
-    run_family::<OffsetSparseTableFamily>(&mut out)?;
-    run_family::<BitBlocksSparseTableFamily>(&mut out)?;
-    run_family::<SparseTableOnBlocksFamily>(&mut out)?;
+    run_family::<u64, IndexSparseTableFamily>(&mut out)?;
+    run_family::<u64, PackedIndexSparseTableFamily>(&mut out)?;
+
+    run_family::<u64, ValueSparseTableFamily>(&mut out)?;
+    run_family::<u64, PackedValueSparseTableFamily>(&mut out)?;
+
+    run_family::<u64, OffsetSparseTableFamily>(&mut out)?;
+
+    run_family::<u64, SparseTableCartesianBlocksFamily>(&mut out)?;
+
+    run_family::<u64, BitBlocksSparseTableFamily>(&mut out)?;
     Ok(())
 }

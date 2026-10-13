@@ -97,5 +97,5 @@ impl<'a, T: Ord> RMQ<'a, T> for SparseTableCartesianBlocks<'a, T> {
 }
 
 crate::rmq_family! {
-    pub SparseTableOnBlocksFamily => SparseTableCartesianBlocks
+    pub SparseTableCartesianBlocksFamily => SparseTableCartesianBlocks
 }

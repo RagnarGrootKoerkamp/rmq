@@ -17,19 +17,23 @@ pub trait RMQFamily<T> {
 /// Declares a family type for an RMQ structure of the form `Name<'a, T>`.
 /// `$rmq` must be an identifier in scope at the call site. Family types are
 /// never instantiated; they exist only so generic code can name the structure
-/// without committing to an input lifetime.
+/// without committing to an input lifetime. Bounds on `T` default to `Ord`;
+/// pass `where T: ...` to override them.
 #[macro_export]
 macro_rules! rmq_family {
-    ($(#[$attr:meta])* $vis:vis $family:ident => $rmq:ident) => {
+    ($(#[$attr:meta])* $vis:vis $family:ident => $rmq:ident where T: $($bound:tt)+) => {
         $(#[$attr])*
         $vis struct $family;
 
-        impl<T: Ord> $crate::base::RMQFamily<T> for $family {
+        impl<T: $($bound)+> $crate::base::RMQFamily<T> for $family {
             type Rmq<'a>
                 = $rmq<'a, T>
             where
                 T: 'a;
         }
+    };
+    ($(#[$attr:meta])* $vis:vis $family:ident => $rmq:ident) => {
+        $crate::rmq_family! { $(#[$attr])* $vis $family => $rmq where T: Ord }
     };
 }
 
