@@ -185,15 +185,15 @@ impl<'a, T: Ord + Copy> RMQ<'a, T> for SparseTable3<'a, T> {
         for i in (0..n).step_by(s) {
             let block = &data[i..n.min(i + s)];
             let id = cartesian_tree_identifier(block, s);
-            if !id_map.contains_key(&id) {
+            if let std::collections::hash_map::Entry::Vacant(e) = id_map.entry(id) {
                 let offset = p_vec.len();
-                id_map.insert(id, offset);
+                e.insert(offset);
                 p_vec.resize(offset + lr_pairs, 0);
-                fill_block_answers(&block, s, &mut p_vec[offset..]);
+                fill_block_answers(block, s, &mut p_vec[offset..]);
             }
 
             t_vec.push(id_map[&id]);
-            a_p_indices.push(i + p_vec[id_map[&id] as usize + _range_index(0, s - 1)] as usize);
+            a_p_indices.push(i + p_vec[id_map[&id] + _range_index(0, s - 1)] as usize);
         }
 
         let mut t = BitFieldVec::new(2 * s, t_vec.len());
@@ -201,7 +201,7 @@ impl<'a, T: Ord + Copy> RMQ<'a, T> for SparseTable3<'a, T> {
             t.set_value(i, t_vec[i]);
         }
 
-        let n_p = (n + s - 1) / s;
+        let n_p = n.div_ceil(s);
         let mut t_p_vec: Vec<usize> = Vec::new();
         let mut a_pp_indices: Vec<usize> = Vec::new();
 
@@ -212,9 +212,9 @@ impl<'a, T: Ord + Copy> RMQ<'a, T> for SparseTable3<'a, T> {
                 .collect();
             let id = cartesian_tree_identifier(&block, s);
 
-            if !id_map.contains_key(&id) {
+            if let std::collections::hash_map::Entry::Vacant(e) = id_map.entry(id) {
                 let offset = p_vec.len();
-                id_map.insert(id, offset);
+                e.insert(offset);
                 p_vec.resize(offset + lr_pairs, 0);
                 fill_block_answers(&block, s, &mut p_vec[offset..]);
             }
@@ -222,7 +222,7 @@ impl<'a, T: Ord + Copy> RMQ<'a, T> for SparseTable3<'a, T> {
             t_p_vec.push(id_map[&id]);
             // Data position of the out-block minimum, so the table compares real values.
             a_pp_indices.push(
-                a_p_indices[i + p_vec[id_map[&id] as usize + _range_index(0, s - 1)] as usize],
+                a_p_indices[i + p_vec[id_map[&id] + _range_index(0, s - 1)] as usize],
             );
         }
 

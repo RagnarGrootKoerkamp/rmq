@@ -6,7 +6,7 @@ use std::time::Instant;
 use rmq::base::{MemoryUsage, RMQ, RMQFamily};
 use rmq::bit_blocks::BitBlocksSparseTableFamily;
 use rmq::sparse_table::{
-    IndexSparseTable, IndexSparseTableFamily, OffsetSparseTable, OffsetSparseTableFamily,
+    IndexSparseTableFamily, OffsetSparseTableFamily,
     PackedIndexSparseTableFamily, PackedValueSparseTableFamily, ValueSparseTableFamily,
 };
 

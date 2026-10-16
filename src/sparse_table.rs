@@ -31,11 +31,11 @@ impl<'a, T: Ord> RMQ<'a, T> for OffsetSparseTable<'a, T> {
             k_max,
             data,
             offsets: (1..=k_max)
-                .map(|k| BitFieldVec::new(k as usize, n))
+                .map(|k| BitFieldVec::new(k, n))
                 .collect(),
         };
         for i in 0..table.n - 1 {
-            table.offsets[0].set_value(i, (table.data.argmin(i, i + 1) - i));
+            table.offsets[0].set_value(i, table.data.argmin(i, i + 1) - i);
         }
         for k in 2..=table.k_max {
             for i in 0..table.n + 1 - (1 << k) {
@@ -48,10 +48,10 @@ impl<'a, T: Ord> RMQ<'a, T> for OffsetSparseTable<'a, T> {
                 };
                 table.offsets[k - 1].set_value(
                     i,
-                    (table
+                    table
                         .data
-                        .argmin(i + loffset as usize, i + roffset as usize)
-                        - i),
+                        .argmin(i + loffset, i + roffset)
+                        - i,
                 );
             }
         }
