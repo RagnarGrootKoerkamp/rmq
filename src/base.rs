@@ -53,3 +53,10 @@ pub trait MemoryUsage {
     /// Bytes used by this structure, excluding the borrowed input data.
     fn memory_bytes(&self) -> usize;
 }
+
+impl MemoryUsage for sux::bits::BitFieldVec {
+    /// Bytes used by the packed backing words; ignores struct and capacity overhead.
+    fn memory_bytes(&self) -> usize {
+        (self.len() * self.bit_width()).div_ceil(usize::BITS as usize) * size_of::<usize>()
+    }
+}

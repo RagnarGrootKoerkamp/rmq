@@ -5,18 +5,22 @@ use crate::{
     packed_vec::PackedVec,
 };
 
+use sux::{
+    bits::BitFieldVec,
+    traits::{SliceByValue, SliceByValueMut},
+};
+
 pub struct OffsetSparseTable<'a, T> {
     n: usize,
     k_max: usize,
     data: &'a [T],
-    // Offsets can be packed more tightly
-    offsets: Vec<PackedVec>,
+    offsets: Vec<BitFieldVec>,
 }
 
 impl<'a, T> MemoryUsage for OffsetSparseTable<'a, T> {
     fn memory_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
-            + self.offsets.len() * std::mem::size_of::<PackedVec>()
+            + self.offsets.len() * std::mem::size_of::<BitFieldVec>()
             + self.offsets.iter().map(|o| o.memory_bytes()).sum::<usize>()
     }
 }
@@ -29,29 +33,24 @@ impl<'a, T: Ord> RMQ<'a, T> for OffsetSparseTable<'a, T> {
             n,
             k_max,
             data,
-            offsets: (1..=k_max).map(|k| PackedVec::new(n, k as u32)).collect(),
+            offsets: (1..=k_max)
+                .map(|k| BitFieldVec::new(k as usize, n))
+                .collect(),
         };
         for i in 0..table.n - 1 {
-            table.offsets[0].set(
-                i,
-                if table.data[i] <= table.data[i + 1] {
-                    0
-                } else {
-                    1
-                },
-            );
+            table.offsets[0].set_value(i, (table.data.argmin(i, i + 1) - i));
         }
         for k in 2..=table.k_max {
             for i in 0..table.n + 1 - (1 << k) {
-                let loffset = table.offsets[k - 2].get(i);
-                let roffset = table.offsets[k - 2].get(i + (1 << (k - 1))) + (1 << (k - 1));
-                table.offsets[k - 1].set(
+                let loffset = table.offsets[k - 2].get_value(i).unwrap();
+                let roffset =
+                    table.offsets[k - 2].get_value(i + (1 << (k - 1))).unwrap() + (1 << (k - 1));
+                table.offsets[k - 1].set_value(
                     i,
-                    if table.data[i + loffset as usize] <= table.data[i + roffset as usize] {
-                        loffset
-                    } else {
-                        roffset
-                    },
+                    (table
+                        .data
+                        .argmin(i + loffset as usize, i + roffset as usize)
+                        - i),
                 );
             }
         }
@@ -65,8 +64,9 @@ impl<'a, T: Ord> RMQ<'a, T> for OffsetSparseTable<'a, T> {
         }
 
         let k = (r - l + 1).ilog2() as usize;
-        let left_index = self.offsets[k - 1].get(l) as usize + l;
-        let right_index = self.offsets[k - 1].get(r + 1 - (1 << k)) as usize + r + 1 - (1 << k);
+        let left_index = self.offsets[k - 1].get_value(l).unwrap() as usize + l;
+        let right_index =
+            self.offsets[k - 1].get_value(r + 1 - (1 << k)).unwrap() as usize + r + 1 - (1 << k);
 
         self.data.argmin(left_index, right_index)
     }
@@ -203,11 +203,106 @@ crate::rmq_family! {
     pub PackedIndexSparseTableFamily => PackedIndexSparseTable
 }
 
+pub struct PositionOffsetSparseTable<'a, T> {
+    n: usize,
+    k_max: usize,
+    data: &'a [T],
+    positions: PackedVec,
+    offsets: Vec<PackedVec>,
+}
+
+impl<'a, T: Ord> PositionOffsetSparseTable<'a, T> {
+    pub fn new(data: &'a [T], positions: &[usize]) -> Self {
+        let n = positions.len();
+        let k_max = if n == 0 { 0 } else { n.ilog2() as usize };
+
+        let max_position = positions.iter().copied().max().unwrap_or(0) as u64;
+        let width = (u64::BITS - max_position.leading_zeros()).max(1);
+        let mut packed_positions = PackedVec::new(n, width);
+        for i in 0..n {
+            packed_positions.set(i, positions[i] as u64);
+        }
+        let mut offsets: Vec<PackedVec> =
+            (1..=k_max).map(|k| PackedVec::new(n, k as u32)).collect();
+
+        for k in 1..=k_max {
+            let half = 1 << (k - 1);
+            for i in 0..n + 1 - (1 << k) {
+                let loffset = if k == 1 { 0 } else { offsets[k - 2].get(i) };
+                let roffset = half as u64
+                    + if k == 1 {
+                        0
+                    } else {
+                        offsets[k - 2].get(i + half)
+                    };
+                let lpos = positions[i + loffset as usize];
+                let rpos = positions[i + roffset as usize];
+                offsets[k - 1].set(
+                    i,
+                    if data[lpos] <= data[rpos] {
+                        loffset
+                    } else {
+                        roffset
+                    },
+                );
+            }
+        }
+        Self {
+            n,
+            k_max,
+            data,
+            positions: packed_positions,
+            offsets,
+        }
+    }
+
+    #[inline]
+    fn position(&self, slot: usize) -> usize {
+        self.positions.get(slot) as usize
+    }
+}
+
+impl<'a, T> MemoryUsage for PositionOffsetSparseTable<'a, T> {
+    fn memory_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.positions.memory_bytes()
+            + self.offsets.len() * std::mem::size_of::<PackedVec>()
+            + self.offsets.iter().map(|o| o.memory_bytes()).sum::<usize>()
+    }
+}
+
+impl<'a, T: Ord> RMQ<'a, T> for PositionOffsetSparseTable<'a, T> {
+    fn new(data: &'a [T]) -> Self
+    where
+        Self: Sized,
+    {
+        let positions: Vec<usize> = (0..data.len()).collect();
+        PositionOffsetSparseTable::new(data, &positions)
+    }
+
+    // Queries slots [l, r], returning a data position.
+    fn rmq(&self, l: usize, r: usize) -> usize {
+        if l == r {
+            return self.position(l);
+        }
+        let k = (r - l + 1).ilog2() as usize;
+        let s = r + 1 - (1 << k);
+        let left_index = self.position(l + self.offsets[k - 1].get(l) as usize);
+        let right_index = self.position(s + self.offsets[k - 1].get(s) as usize);
+
+        self.data.argmin(left_index, right_index)
+    }
+}
+
+crate::rmq_family! {
+    pub PositionOffsetSparseTableFamily => PositionOffsetSparseTable
+}
+
 pub struct ValueSparseTable<'a, T> {
     n: usize,
     k_max: usize,
     entries: Vec<MaybeUninit<(usize, T)>>,
-    _marker: PhantomData<&'a T>
+    _marker: PhantomData<&'a T>,
 }
 
 impl<'a, T: Ord + Copy> ValueSparseTable<'a, T> {
@@ -218,7 +313,7 @@ impl<'a, T: Ord + Copy> ValueSparseTable<'a, T> {
             n,
             k_max,
             entries: vec![MaybeUninit::uninit(); (k_max + 1) * n],
-            _marker: PhantomData
+            _marker: PhantomData,
         };
 
         for i in 0..n {
@@ -227,12 +322,9 @@ impl<'a, T: Ord + Copy> ValueSparseTable<'a, T> {
         for k in 1..=table.k_max {
             for i in 0..table.n + 1 - (1 << k) {
                 let lentry = unsafe { table.entries[(k - 1) * table.n + i].assume_init() };
-                let rentry = unsafe { table.entries[(k - 1) * table.n + i + (1 << (k - 1))].assume_init() };
-                table.entries[k * n + i].write(if rentry.1 < lentry.1 {
-                    rentry
-                } else {
-                    lentry
-                });
+                let rentry =
+                    unsafe { table.entries[(k - 1) * table.n + i + (1 << (k - 1))].assume_init() };
+                table.entries[k * n + i].write(if rentry.1 < lentry.1 { rentry } else { lentry });
             }
         }
         table
@@ -241,7 +333,8 @@ impl<'a, T: Ord + Copy> ValueSparseTable<'a, T> {
 
 impl<'a, T> MemoryUsage for ValueSparseTable<'a, T> {
     fn memory_bytes(&self) -> usize {
-        std::mem::size_of::<Self>() + self.entries.len() * std::mem::size_of::<MaybeUninit<(usize, T)>>()
+        std::mem::size_of::<Self>()
+            + self.entries.len() * std::mem::size_of::<MaybeUninit<(usize, T)>>()
     }
 }
 
@@ -257,7 +350,7 @@ impl<'a, T: Ord + Copy> RMQ<'a, T> for ValueSparseTable<'a, T> {
     // Queries [l, r]
     fn rmq(&self, l: usize, r: usize) -> usize {
         let k = (r - l + 1).ilog2() as usize;
-        let left_entry = unsafe { self.entries[k * self.n + l] .assume_init() };
+        let left_entry = unsafe { self.entries[k * self.n + l].assume_init() };
         let right_entry = unsafe { self.entries[k * self.n + r + 1 - (1 << k)].assume_init() };
 
         if right_entry.1 < left_entry.1 {
@@ -307,7 +400,9 @@ impl<'a, T: Copy + Into<u64>> PackedValueSparseTable<'a, T> {
         for k in 1..=table.k_max {
             for i in 0..table.n + 1 - (1 << k) {
                 let lentry = table.entries.get_u128((k - 1) * table.n + i);
-                let rentry = table.entries.get_u128((k - 1) * table.n + i + (1 << (k - 1)));
+                let rentry = table
+                    .entries
+                    .get_u128((k - 1) * table.n + i + (1 << (k - 1)));
                 table.entries.set_u128(k * n + i, lentry.min(rentry));
             }
         }

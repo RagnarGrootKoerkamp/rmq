@@ -1,7 +1,10 @@
+use std::collections::HashMap;
+
 use crate::{
     base::{MemoryUsage, RMQ, TwoArgMin},
     cartesian_tree::cartesian_tree_identifier,
-    sparse_table::IndexSparseTable,
+    packed_vec::PackedVec,
+    sparse_table::{IndexSparseTable, PositionOffsetSparseTable},
 };
 
 pub struct SparseTableCartesianBlocks<'a, T> {
@@ -98,4 +101,188 @@ impl<'a, T: Ord> RMQ<'a, T> for SparseTableCartesianBlocks<'a, T> {
 
 crate::rmq_family! {
     pub SparseTableCartesianBlocksFamily => SparseTableCartesianBlocks
+}
+
+/// Fills `out` with in-block answers for every range of a size-`s` block.
+/// A short block is treated as padded with +inf, matching the padding in
+/// `cartesian_tree_identifier`, so the answers are valid for any block sharing its id.
+fn fill_block_answers<T: Ord>(block: &[T], s: usize, out: &mut [u16]) {
+    for l in 0..s {
+        let mut min_idx = l;
+        for r in l..s {
+            if r < block.len() {
+                min_idx = block.argmin(min_idx, r);
+            }
+            out[_range_index(l, r)] = min_idx as u16;
+        }
+    }
+}
+
+pub struct SparseTable3<'a, T> {
+    n: usize,
+    s: usize,
+    data: &'a [T],
+    p: PackedVec,
+    t: PackedVec,
+    t_: PackedVec,
+    oblock_table: PositionOffsetSparseTable<'a, T>,
+}
+
+impl<'a, T> MemoryUsage for SparseTable3<'a, T> {
+    fn memory_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.p.memory_bytes()
+            + self.t.memory_bytes()
+            + self.t_.memory_bytes()
+            + self.oblock_table.memory_bytes()
+    }
+}
+
+impl<'a, T: Ord> SparseTable3<'a, T> {
+    #[inline]
+    fn in_block(&self, block: usize, l: usize, r: usize) -> usize {
+        block * self.s + self.p.get(self.t.get(block) as usize + _range_index(l, r)) as usize
+    }
+
+    #[inline]
+    fn in_oblock(&self, oblock: usize, l: usize, r: usize) -> usize {
+        let j = self
+            .p
+            .get(self.t_.get(oblock) as usize + _range_index(l, r)) as usize;
+        self.a_p_index(oblock * self.s + j)
+    }
+
+    #[inline]
+    /// Data position of A'[i], the minimum of block i.
+    fn a_p_index(&self, i: usize) -> usize {
+        self.in_block(i, 0, self.s - 1)
+    }
+}
+
+impl<'a, T: Ord + Copy> RMQ<'a, T> for SparseTable3<'a, T> {
+    fn new(data: &'a [T]) -> Self
+    where
+        Self: Sized,
+    {
+        let n = data.len();
+        let s: usize = ((n as f64).log2() / 4f64).ceil().max(1f64) as usize;
+        let lr_pairs = s * (s + 1) / 2;
+
+        let mut p_vec: Vec<u16> = Vec::new();
+        let mut id_map: HashMap<u64, usize> = HashMap::new();
+        let mut t_vec: Vec<usize> = Vec::new();
+
+        let mut a_p_indices: Vec<usize> = Vec::new();
+
+        for i in (0..n).step_by(s) {
+            let block = &data[i..n.min(i + s)];
+            let id = cartesian_tree_identifier(block, s);
+            if !id_map.contains_key(&id) {
+                let offset = p_vec.len();
+                id_map.insert(id, offset);
+                p_vec.resize(offset + lr_pairs, 0);
+                fill_block_answers(&block, s, &mut p_vec[offset..]);
+            }
+
+            t_vec.push(id_map[&id]);
+            a_p_indices.push(i + p_vec[id_map[&id] as usize + _range_index(0, s - 1)] as usize);
+        }
+
+        let mut t = PackedVec::new(t_vec.len(), 2 * s as u32);
+        for i in 0..t_vec.len() {
+            t.set(i, t_vec[i] as u64);
+        }
+
+        let n_p = (n + s - 1) / s;
+        let mut t_p_vec: Vec<usize> = Vec::new();
+        let mut a_pp_indices: Vec<usize> = Vec::new();
+
+        for i in (0..n_p).step_by(s) {
+            let block: Vec<T> = a_p_indices[i..n_p.min(i + s)]
+                .iter()
+                .map(|idx| data[*idx])
+                .collect();
+            let id = cartesian_tree_identifier(&block, s);
+
+            if !id_map.contains_key(&id) {
+                let offset = p_vec.len();
+                id_map.insert(id, offset);
+                p_vec.resize(offset + lr_pairs, 0);
+                fill_block_answers(&block, s, &mut p_vec[offset..]);
+            }
+
+            t_p_vec.push(id_map[&id]);
+            // Data position of the out-block minimum, so the table compares real values.
+            a_pp_indices.push(
+                a_p_indices[i + p_vec[id_map[&id] as usize + _range_index(0, s - 1)] as usize],
+            );
+        }
+
+        let mut t_ = PackedVec::new(t_p_vec.len(), 2 * s as u32);
+        for i in 0..t_p_vec.len() {
+            t_.set(i, t_p_vec[i] as u64);
+        }
+
+        let mut p = PackedVec::new(p_vec.len(), s.ilog2() + 1);
+        for i in 0..p_vec.len() {
+            p.set(i, p_vec[i] as u64);
+        }
+
+        SparseTable3 {
+            n,
+            s,
+            data,
+            p,
+            t,
+            t_,
+            oblock_table: PositionOffsetSparseTable::new(data, &a_pp_indices),
+        }
+    }
+
+    fn rmq(&self, l: usize, r: usize) -> usize {
+        let left_iblock = l / self.s;
+        let right_iblock = r / self.s;
+
+        if left_iblock == right_iblock {
+            return self.in_block(left_iblock, l % self.s, r % self.s);
+        }
+        let left_iblock_result = self.in_block(left_iblock, l % self.s, self.s - 1);
+        let right_iblock_result = self.in_block(right_iblock, 0, r % self.s);
+
+        // Whole blocks strictly between the two partial ones, as indices into A'.
+        // Results are combined left to right so ties resolve to the leftmost minimum.
+        if right_iblock - left_iblock == 1 {
+            return self.data.argmin(left_iblock_result, right_iblock_result);
+        }
+        let left_mid = left_iblock + 1;
+        let right_mid = right_iblock - 1;
+
+        let left_oblock = left_mid / self.s;
+        let right_oblock = right_mid / self.s;
+
+        let mid_result = if left_oblock == right_oblock {
+            self.in_oblock(left_oblock, left_mid % self.s, right_mid % self.s)
+        } else {
+            let left_oblock_result = self.in_oblock(left_oblock, left_mid % self.s, self.s - 1);
+            let right_oblock_result = self.in_oblock(right_oblock, 0, right_mid % self.s);
+            if right_oblock - left_oblock > 1 {
+                let table_result = self.oblock_table.rmq(left_oblock + 1, right_oblock - 1);
+                self.data.argmin(
+                    self.data.argmin(left_oblock_result, table_result),
+                    right_oblock_result,
+                )
+            } else {
+                self.data.argmin(left_oblock_result, right_oblock_result)
+            }
+        };
+
+        self.data.argmin(
+            self.data.argmin(left_iblock_result, mid_result),
+            right_iblock_result,
+        )
+    }
+}
+
+crate::rmq_family! {
+    pub SparseTable3Family => SparseTable3 where T: Ord + Copy
 }
