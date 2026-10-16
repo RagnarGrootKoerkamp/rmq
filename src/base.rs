@@ -54,9 +54,10 @@ pub trait MemoryUsage {
     fn memory_bytes(&self) -> usize;
 }
 
-impl MemoryUsage for sux::bits::BitFieldVec {
+impl<W: sux::traits::Word> MemoryUsage for sux::bits::BitFieldVec<Vec<W>> {
     /// Bytes used by the packed backing words; ignores struct and capacity overhead.
     fn memory_bytes(&self) -> usize {
-        (self.len() * self.bit_width()).div_ceil(usize::BITS as usize) * size_of::<usize>()
+        let word_bits = 8 * size_of::<W>();
+        (self.len() * self.bit_width()).div_ceil(word_bits) * size_of::<W>()
     }
 }

@@ -3,8 +3,12 @@ use std::collections::HashMap;
 use crate::{
     base::{MemoryUsage, RMQ, TwoArgMin},
     cartesian_tree::cartesian_tree_identifier,
-    packed_vec::PackedVec,
     sparse_table::{IndexSparseTable, PositionOffsetSparseTable},
+};
+
+use sux::{
+    bits::BitFieldVec,
+    traits::{SliceByValue, SliceByValueMut},
 };
 
 pub struct SparseTableCartesianBlocks<'a, T> {
@@ -122,9 +126,9 @@ pub struct SparseTable3<'a, T> {
     n: usize,
     s: usize,
     data: &'a [T],
-    p: PackedVec,
-    t: PackedVec,
-    t_: PackedVec,
+    p: BitFieldVec,
+    t: BitFieldVec,
+    t_: BitFieldVec,
     oblock_table: PositionOffsetSparseTable<'a, T>,
 }
 
@@ -141,14 +145,18 @@ impl<'a, T> MemoryUsage for SparseTable3<'a, T> {
 impl<'a, T: Ord> SparseTable3<'a, T> {
     #[inline]
     fn in_block(&self, block: usize, l: usize, r: usize) -> usize {
-        block * self.s + self.p.get(self.t.get(block) as usize + _range_index(l, r)) as usize
+        unsafe {
+            let offset = self.t.get_value_unchecked(block);
+            block * self.s + self.p.get_value_unchecked(offset + _range_index(l, r))
+        }
     }
 
     #[inline]
     fn in_oblock(&self, oblock: usize, l: usize, r: usize) -> usize {
-        let j = self
-            .p
-            .get(self.t_.get(oblock) as usize + _range_index(l, r)) as usize;
+        let j = unsafe {
+            let offset = self.t_.get_value_unchecked(oblock);
+            self.p.get_value_unchecked(offset + _range_index(l, r))
+        };
         self.a_p_index(oblock * self.s + j)
     }
 
@@ -188,9 +196,9 @@ impl<'a, T: Ord + Copy> RMQ<'a, T> for SparseTable3<'a, T> {
             a_p_indices.push(i + p_vec[id_map[&id] as usize + _range_index(0, s - 1)] as usize);
         }
 
-        let mut t = PackedVec::new(t_vec.len(), 2 * s as u32);
+        let mut t = BitFieldVec::new(2 * s, t_vec.len());
         for i in 0..t_vec.len() {
-            t.set(i, t_vec[i] as u64);
+            t.set_value(i, t_vec[i]);
         }
 
         let n_p = (n + s - 1) / s;
@@ -218,14 +226,14 @@ impl<'a, T: Ord + Copy> RMQ<'a, T> for SparseTable3<'a, T> {
             );
         }
 
-        let mut t_ = PackedVec::new(t_p_vec.len(), 2 * s as u32);
+        let mut t_ = BitFieldVec::new(2 * s, t_p_vec.len());
         for i in 0..t_p_vec.len() {
-            t_.set(i, t_p_vec[i] as u64);
+            t_.set_value(i, t_p_vec[i]);
         }
 
-        let mut p = PackedVec::new(p_vec.len(), s.ilog2() + 1);
+        let mut p = BitFieldVec::new(s.ilog2() as usize + 1, p_vec.len());
         for i in 0..p_vec.len() {
-            p.set(i, p_vec[i] as u64);
+            p.set_value(i, p_vec[i] as usize);
         }
 
         SparseTable3 {
