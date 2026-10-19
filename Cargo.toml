@@ -8,6 +8,7 @@ rand = "0.10.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sux = "0.15.0"
+clap = { version = "4", features = ["derive"] }
 
 [features]
 # Exposes `rmq::testing` and the `rmq_conformance!` macro to integration tests.
@@ -22,3 +23,7 @@ rmq = { path = ".", features = ["testing"] }
 [[bench]]
 name = "scaling"
 harness = false
+
+[profile.release]
+lto = "fat"
+codegen-units = 1

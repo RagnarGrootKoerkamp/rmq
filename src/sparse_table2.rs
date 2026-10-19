@@ -33,11 +33,9 @@ impl<'a, T: Ord> SparseTableCartesianBlocks<'a, T> {
 }
 
 impl<'a, T> MemoryUsage for SparseTableCartesianBlocks<'a, T> {
-    fn memory_bytes(&self) -> usize {
-        // The nested table's own struct size is already part of size_of::<Self>().
-        std::mem::size_of::<Self>() - std::mem::size_of::<IndexSparseTable<T>>()
-            + (self.block_id.len() + self.block_responses.len()) * std::mem::size_of::<usize>()
-            + self.block_sparse_table.memory_bytes()
+    fn memory_allocated(&self) -> usize {
+        (self.block_id.len() + self.block_responses.len()) * std::mem::size_of::<usize>()
+            + self.block_sparse_table.memory_allocated()
     }
 }
 
@@ -133,12 +131,11 @@ pub struct SparseTable3<'a, T> {
 }
 
 impl<'a, T> MemoryUsage for SparseTable3<'a, T> {
-    fn memory_bytes(&self) -> usize {
-        std::mem::size_of::<Self>()
-            + self.p.memory_bytes()
-            + self.t.memory_bytes()
-            + self.t_.memory_bytes()
-            + self.oblock_table.memory_bytes()
+    fn memory_allocated(&self) -> usize {
+        self.p.memory_allocated()
+            + self.t.memory_allocated()
+            + self.t_.memory_allocated()
+            + self.oblock_table.memory_allocated()
     }
 }
 

@@ -21,11 +21,9 @@ fn in_window(stack: &[u64], l: usize, r: usize) -> usize {
 }
 
 impl<'a, T> MemoryUsage for BitBlocksSparseTable<'a, T> {
-    fn memory_bytes(&self) -> usize {
-        // The nested table's own struct size is already part of size_of::<Self>().
-        std::mem::size_of::<Self>() - std::mem::size_of::<IndexSparseTable<T>>()
-            + self.stack.len() * std::mem::size_of::<u64>()
-            + self.block_sparse_table.memory_bytes()
+    fn memory_allocated(&self) -> usize {
+        self.stack.len() * std::mem::size_of::<u64>()
+            + self.block_sparse_table.memory_allocated()
     }
 }
 

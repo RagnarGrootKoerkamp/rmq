@@ -7,8 +7,8 @@ pub struct RMQTree<'a, T> {
 }
 
 impl<'a, T> MemoryUsage for RMQTree<'a, T> {
-    fn memory_bytes(&self) -> usize {
-        std::mem::size_of::<Self>() + self.tree.len() * std::mem::size_of::<usize>()
+    fn memory_allocated(&self) -> usize {
+        self.tree.len() * std::mem::size_of::<usize>()
     }
 }
 

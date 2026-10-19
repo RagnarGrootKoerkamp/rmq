@@ -3,8 +3,8 @@ use crate::base::{MemoryUsage, RMQ};
 pub struct NaiveRMQ<'a, T: Ord>(&'a [T]);
 
 impl<'a, T: Ord> MemoryUsage for NaiveRMQ<'a, T> {
-    fn memory_bytes(&self) -> usize {
-        std::mem::size_of::<Self>()
+    fn memory_allocated(&self) -> usize {
+        0
     }
 }
 

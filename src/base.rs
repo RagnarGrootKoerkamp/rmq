@@ -3,7 +3,6 @@ pub trait RMQ<'a, T: Sized> {
     where
         Self: Sized;
 
-    // TODO: change to argmin?
     fn rmq(&self, l: usize, r: usize) -> usize;
     // TODO: Add fn len(&self) -> usize;
 }
@@ -19,21 +18,31 @@ pub trait RMQFamily<T> {
 /// never instantiated; they exist only so generic code can name the structure
 /// without committing to an input lifetime. Bounds on `T` default to `Ord`;
 /// pass `where T: ...` to override them.
+///
+/// Const parameters can be declared on the family (`Family<const B: usize>`);
+/// they are forwarded in order after `T`, so the structure must have the form
+/// `Name<'a, T, B, ...>`.
 #[macro_export]
 macro_rules! rmq_family {
-    ($(#[$attr:meta])* $vis:vis $family:ident => $rmq:ident where T: $($bound:tt)+) => {
+    ($(#[$attr:meta])* $vis:vis $family:ident $(<$(const $p:ident : $pty:ty),+ $(,)?>)?
+        => $rmq:ident where T: $($bound:tt)+) => {
         $(#[$attr])*
-        $vis struct $family;
+        $vis struct $family $(<$(const $p: $pty),+>)?;
 
-        impl<T: $($bound)+> $crate::base::RMQFamily<T> for $family {
+        impl<T: $($bound)+ $($(, const $p: $pty)+)?> $crate::base::RMQFamily<T>
+            for $family $(<$($p),+>)?
+        {
             type Rmq<'a>
-                = $rmq<'a, T>
+                = $rmq<'a, T $($(, $p)+)?>
             where
                 T: 'a;
         }
     };
-    ($(#[$attr:meta])* $vis:vis $family:ident => $rmq:ident) => {
-        $crate::rmq_family! { $(#[$attr])* $vis $family => $rmq where T: Ord }
+    ($(#[$attr:meta])* $vis:vis $family:ident $(<$(const $p:ident : $pty:ty),+ $(,)?>)?
+        => $rmq:ident) => {
+        $crate::rmq_family! {
+            $(#[$attr])* $vis $family $(<$(const $p: $pty),+>)? => $rmq where T: Ord
+        }
     };
 }
 
@@ -49,14 +58,19 @@ impl<T: Ord> TwoArgMin for &[T] {
     }
 }
 
-pub trait MemoryUsage {
-    /// Bytes used by this structure, excluding the borrowed input data.
-    fn memory_bytes(&self) -> usize;
+pub trait MemoryUsage: Sized {
+    /// Heap bytes allocated by this structure, excluding the struct itself
+    /// and the borrowed input data.
+    fn memory_allocated(&self) -> usize;
+
+    fn memory_total(&self) -> usize {
+        std::mem::size_of::<Self>() + self.memory_allocated()
+    }
 }
 
 impl<W: sux::traits::Word> MemoryUsage for sux::bits::BitFieldVec<Vec<W>> {
     /// Bytes used by the packed backing words; ignores struct and capacity overhead.
-    fn memory_bytes(&self) -> usize {
+    fn memory_allocated(&self) -> usize {
         let word_bits = 8 * size_of::<W>();
         (self.len() * self.bit_width()).div_ceil(word_bits) * size_of::<W>()
     }

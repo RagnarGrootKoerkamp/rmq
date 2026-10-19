@@ -4,16 +4,12 @@ use std::io::{BufWriter, Write};
 use std::time::Instant;
 
 use rmq::base::{MemoryUsage, RMQ, RMQFamily};
-use rmq::bit_blocks::BitBlocksSparseTableFamily;
-use rmq::sparse_table::{
-    IndexSparseTableFamily, OffsetSparseTableFamily,
-    PackedIndexSparseTableFamily, PackedValueSparseTableFamily, ValueSparseTableFamily,
-};
+use rmq::*;
+use clap::Parser;
 
 use rand::prelude::*;
 use rand::rngs::Xoshiro256PlusPlus;
 use rand::seq::SliceRandom;
-use rmq::sparse_table2::{SparseTable3Family, SparseTableCartesianBlocksFamily};
 use serde::Serialize;
 
 fn get_rng() -> Xoshiro256PlusPlus {
@@ -150,7 +146,7 @@ fn run_benchmarks<T: RMQValue, F: RMQFamily<T>>(n: usize) -> Option<BenchmarkRes
     let data = get_random_permutation(&mut rng, n);
 
     let rmq = F::Rmq::new(&data);
-    let memory_bytes = rmq.memory_bytes();
+    let memory_bytes = rmq.memory_total();
     if memory_bytes > MEMORY_THRESHOLD_BYTES {
         return None;
     }
@@ -225,23 +221,43 @@ fn run_family<T: RMQValue, F: RMQFamily<T>>(out: &mut impl Write) -> std::io::Re
     Ok(())
 }
 
+#[derive(Parser)]
+struct Args {
+    run: String,
+}
+
 fn main() -> std::io::Result<()> {
+    let args = Args::parse();
+
     prefer_performance_cores();
 
-    let mut out = BufWriter::new(File::create("results.jsonl")?);
+    let mut out = BufWriter::new(File::create(format!("runs/{}.jsonl", args.run))?);
 
-    run_family::<u8, IndexSparseTableFamily>(&mut out)?;
-    run_family::<u8, PackedIndexSparseTableFamily>(&mut out)?;
+    // run_family::<u32, StridedIndexSparseTableFamily<256, 256>>(&mut out)?;
+    // run_family::<u32, StridedIndexSparseTableFamily<32, 32>>(&mut out)?;
+    // run_family::<u32, StridedIndexAffixMasksSparseTableFamily<32, 32>>(&mut out)?;
+    run_family::<u32, StridedIndexMinHeapSparseTableFamily<32, 32>>(&mut out)?;
+    // run_family::<u32, StridedIndexSparseTableFamily<32, 32>>(&mut out)?;
+    // run_family::<u32, StridedIndexAffixMasksSparseTableFamily<32, 32>>(&mut out)?;
+    // run_family::<u32, StridedIndexSparseTableFamily<16, 16>>(&mut out)?;
+    // run_family::<u32, StridedIndexAffixMasksSparseTableFamily<16, 16>>(&mut out)?;
 
-    run_family::<u8, ValueSparseTableFamily>(&mut out)?;
-    run_family::<u8, PackedValueSparseTableFamily>(&mut out)?;
-
-    run_family::<u8, OffsetSparseTableFamily>(&mut out)?;
-
-    run_family::<u8, SparseTableCartesianBlocksFamily>(&mut out)?;
-    run_family::<u8, BitBlocksSparseTableFamily>(&mut out)?;
-
-    run_family::<u8, SparseTable3Family>(&mut out)?;
+    // // Sweep over block size B and over-sampling threshold S (const generics, so the grid is
+    // // spelled out). S > B is pointless: a same-block query spans fewer than B elements.
+    // macro_rules! sweep {
+    //     ($($b:literal => [$($s:literal),+]),+ $(,)?) => {
+    //         $($(
+    //             run_family::<u32, StridedIndexSparseTableFamily<$b, $s>>(&mut out)?;
+    //         )+)+
+    //     };
+    // }
+    // sweep! {
+    //     16 => [8, 16],
+    //     32 => [8, 16, 32],
+    //     64 => [8, 16, 32, 64],
+    //     128 => [16, 32, 64, 128],
+    //     256 => [32, 64, 128, 256],
+    // }
 
     Ok(())
 }
