@@ -31,18 +31,18 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
 
         for i in (0..n).step_by(B) {
             let mut idx = i;
-            for j in (i + 1..(i + B).min(n)) {
+            for j in i + 1..(i + B).min(n) {
                 idx = data.argmin(idx, j);
             }
             indices.push(idx);
         }
 
-        let table = Self {
+        
+
+        Self {
             data,
             sparse_table: OwningOffsetSparseTable::new(data, &indices),
-        };
-
-        table
+        }
     }
 
     // Queries [l, r]
@@ -53,7 +53,7 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
         if lblock == rblock {
             if B > S && r - l > S {
                 let over_sample_result = self.sparse_table.rmq(lblock, lblock);
-                if (over_sample_result >= l && over_sample_result <= r) {
+                if over_sample_result >= l && over_sample_result <= r {
                     return over_sample_result;
                 }
             }
@@ -118,7 +118,6 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
         const { assert!(B <= 64, "affix masks are u64, so B must be <= 64") };
 
         let n = data.len();
-        let k_max = n.ilog2() as usize;
         let mut indices: Vec<usize> = vec![];
         let mut block_affix_masks = BitFieldVec::new(B, n.div_ceil(B));
 
@@ -126,17 +125,17 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
             let end = (i + B).min(n);
 
             let mut idx = i;
-            for j in (i + 1..end) {
+            for j in i + 1..end {
                 idx = data.argmin(idx, j);
             }
             indices.push(idx);
 
             // Decreasing sequence from start to smallest
             let mut prefix_seq: u64 = 1;
-            for j in (i + 1..end) {
+            for j in i + 1..end {
                 let last = prefix_seq.ilog2();
                 if data[j] < data[i + last as usize] {
-                    prefix_seq |= 1 << j - i;
+                    prefix_seq |= 1 << (j - i);
                 }
             }
 
@@ -145,7 +144,7 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
             for j in (i..end - 1).rev() {
                 let last = suffix_seq.trailing_zeros();
                 if data[j] <= data[i + last as usize] {
-                    suffix_seq |= 1 << j - i;
+                    suffix_seq |= 1 << (j - i);
                 }
             }
 
@@ -154,13 +153,13 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
             block_affix_masks.set_value(i / B, affix_seq as usize);
         }
 
-        let table = Self {
+        
+
+        Self {
             data,
             sparse_table: OwningOffsetSparseTable::new(data, &indices),
             block_affix_masks,
-        };
-
-        table
+        }
     }
 
     // Queries [l, r]
@@ -171,7 +170,7 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
         if lblock == rblock {
             if B > S && r - l > S {
                 let over_sample_result = self.sparse_table.rmq(lblock, lblock);
-                if (over_sample_result >= l && over_sample_result <= r) {
+                if over_sample_result >= l && over_sample_result <= r {
                     return over_sample_result;
                 }
             }
@@ -277,13 +276,13 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
             indices.push(i + crate::cartesian_tree::rmq_on_minheap(id, B, 0, end - 1 - i));
         }
 
-        let table = Self {
+        
+
+        Self {
             data,
             sparse_table: OwningOffsetSparseTable::new(data, &indices),
             block_ids,
-        };
-
-        table
+        }
     }
 
     // Queries [l, r]
@@ -294,7 +293,7 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
         if lblock == rblock {
             if B > S && r - l > S {
                 let over_sample_result = self.sparse_table.rmq(lblock, lblock);
-                if (over_sample_result >= l && over_sample_result <= r) {
+                if over_sample_result >= l && over_sample_result <= r {
                     return over_sample_result;
                 }
             }
@@ -350,7 +349,7 @@ fn in_window(stack: &BitFieldVecU<Box<[u64]>>, l: usize, r: usize) -> usize {
 
 impl<'a, T, const B: usize> MemoryUsage for BitBlocksSparseTable<'a, T, B> {
     fn memory_allocated(&self) -> usize {
-        self.stack.as_ref().len() * std::mem::size_of::<u64>()
+        std::mem::size_of_val(self.stack.as_ref())
             + self.block_sparse_table.memory_allocated()
     }
 }
