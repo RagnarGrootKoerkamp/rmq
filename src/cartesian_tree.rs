@@ -1,4 +1,4 @@
-pub fn cartesian_tree_identifier<T: Ord>(block: &[T], width: usize) -> u64 {
+pub fn convert_to_minheap<T: Ord>(block: &[T], width: usize) -> u64 {
     let mut stack: Vec<&T> = Vec::with_capacity(width);
     let mut id = 0u64;
     let mut bits = 0u32;
@@ -22,9 +22,9 @@ pub fn cartesian_tree_identifier<T: Ord>(block: &[T], width: usize) -> u64 {
     id << (2 * width as u32 - bits)
 }
 
-/// Given an identifier from `cartesian_tree_identifier`, return the index of the
+/// Given an identifier from `convert_to_minheap`, return the index of the
 /// (leftmost) minimum in `block[l..=r]`.
-pub fn rmq_from_identifier(id: u64, width: usize, l: usize, r: usize) -> usize {
+pub fn rmq_on_minheap(id: u64, width: usize, l: usize, r: usize) -> usize {
     debug_assert!(l <= r && r < width && width <= 32);
     // Bit j of `stack` is set iff index j is on the stack
     let mut stack = 0u64;

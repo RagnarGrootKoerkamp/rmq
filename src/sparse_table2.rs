@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     base::{MemoryUsage, RMQ, TwoArgMin},
-    cartesian_tree::cartesian_tree_identifier,
+    cartesian_tree::convert_to_minheap,
     sparse_table::{IndexSparseTable, PositionOffsetSparseTable},
 };
 
@@ -55,7 +55,7 @@ impl<'a, T: Ord> RMQ<'a, T> for SparseTableCartesianBlocks<'a, T> {
 
         for i in (0..n).step_by(b) {
             let block = &data[i..n.min(i + b)];
-            let id = cartesian_tree_identifier(block, b) as usize;
+            let id = convert_to_minheap(block, b) as usize;
             if id_map[id] == usize::MAX {
                 let offset = block_responses.len();
                 id_map[id] = offset;
@@ -181,7 +181,7 @@ impl<'a, T: Ord + Copy> RMQ<'a, T> for SparseTable3<'a, T> {
 
         for i in (0..n).step_by(s) {
             let block = &data[i..n.min(i + s)];
-            let id = cartesian_tree_identifier(block, s);
+            let id = convert_to_minheap(block, s);
             if let std::collections::hash_map::Entry::Vacant(e) = id_map.entry(id) {
                 let offset = p_vec.len();
                 e.insert(offset);
@@ -207,7 +207,7 @@ impl<'a, T: Ord + Copy> RMQ<'a, T> for SparseTable3<'a, T> {
                 .iter()
                 .map(|idx| data[*idx])
                 .collect();
-            let id = cartesian_tree_identifier(&block, s);
+            let id = convert_to_minheap(&block, s);
 
             if let std::collections::hash_map::Entry::Vacant(e) = id_map.entry(id) {
                 let offset = p_vec.len();
@@ -218,9 +218,8 @@ impl<'a, T: Ord + Copy> RMQ<'a, T> for SparseTable3<'a, T> {
 
             t_p_vec.push(id_map[&id]);
             // Data position of the out-block minimum, so the table compares real values.
-            a_pp_indices.push(
-                a_p_indices[i + p_vec[id_map[&id] + _range_index(0, s - 1)] as usize],
-            );
+            a_pp_indices
+                .push(a_p_indices[i + p_vec[id_map[&id] + _range_index(0, s - 1)] as usize]);
         }
 
         let mut t_ = BitFieldVec::new(2 * s, t_p_vec.len());

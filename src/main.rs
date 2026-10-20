@@ -3,9 +3,9 @@ use std::hint::black_box;
 use std::io::{BufWriter, Write};
 use std::time::Instant;
 
+use clap::Parser;
 use rmq::base::{MemoryUsage, RMQ, RMQFamily};
 use rmq::*;
-use clap::Parser;
 
 use rand::prelude::*;
 use rand::rngs::Xoshiro256PlusPlus;
@@ -48,12 +48,6 @@ fn get_random_permutation<T: RMQValue>(rng: &mut dyn Rng, n: usize) -> Vec<T> {
     v
 }
 
-fn sample_range_biased(rng: &mut dyn Rng, n: usize) -> (usize, usize) {
-    let l = rng.random_range(0..n);
-    let r = rng.random_range(l..n);
-    (l, r)
-}
-
 fn sample_range(rng: &mut dyn Rng, n: usize) -> (usize, usize) {
     let mut l = rng.random_range(0..n);
     let mut r = rng.random_range(0..n);
@@ -62,6 +56,31 @@ fn sample_range(rng: &mut dyn Rng, n: usize) -> (usize, usize) {
         r = rng.random_range(0..n);
     }
     (l, r)
+}
+
+trait RangeDistribution {
+    fn sample_range(rng: &mut dyn Rng, n: usize) -> (usize, usize);
+}
+
+struct FullyRandomRangeDistribution;
+impl RangeDistribution for FullyRandomRangeDistribution {
+    fn sample_range(rng: &mut dyn Rng, n: usize) -> (usize, usize) {
+        sample_range(rng, n)
+    }
+}
+
+// Small as in r-l < 128
+struct SmallRangesDistribution;
+impl RangeDistribution for SmallRangesDistribution {
+    fn sample_range(rng: &mut dyn Rng, n: usize) -> (usize, usize) {
+        let mut l = rng.random_range(0..n);
+        let mut r = rng.random_range(l..l+128);
+        while r >= n {
+            l = rng.random_range(0..n);
+            r = rng.random_range(l..l+128);
+        }
+        (l, r)
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -92,7 +111,7 @@ where
     G: FnMut() -> T,
 {
     let start = Instant::now();
-    // BUG: F is called non-determinstic times
+    // FIXME: F is called non-determinstic times
     while start.elapsed().as_millis() < 100 {
         black_box(f(input_generator()));
     }
@@ -141,7 +160,7 @@ where
 const MEMORY_THRESHOLD_BYTES: usize = 1 << 32;
 
 /// Returns `None` if the structure built over `n` elements exceeds the memory threshold.
-fn run_benchmarks<T: RMQValue, F: RMQFamily<T>>(n: usize) -> Option<BenchmarkResult> {
+fn run_benchmarks<T: RMQValue, F: RMQFamily<T>, R: RangeDistribution>(n: usize) -> Option<BenchmarkResult> {
     let mut rng = get_rng();
     let data = get_random_permutation(&mut rng, n);
 
@@ -162,9 +181,9 @@ fn run_benchmarks<T: RMQValue, F: RMQFamily<T>>(n: usize) -> Option<BenchmarkRes
         |(l, r)| {
             black_box(rmq.rmq(black_box(l), black_box(r)));
         },
-        100_000,
+        1_000_000,
         1000,
-        || sample_range(&mut query_rng, n),
+        || R::sample_range(&mut query_rng, n),
     );
 
     // Each query's bounds depend on the previous result (`prev & zero` is always 0, but neither
@@ -180,7 +199,7 @@ fn run_benchmarks<T: RMQValue, F: RMQFamily<T>>(n: usize) -> Option<BenchmarkRes
         },
         1_000_000,
         1000,
-        || sample_range(&mut query_rng, n),
+        || R::sample_range(&mut query_rng, n),
     );
 
     Some(BenchmarkResult {
@@ -211,7 +230,7 @@ fn run_family<T: RMQValue, F: RMQFamily<T>>(out: &mut impl Write) -> std::io::Re
         if n > MAX_N {
             break;
         }
-        let Some(res) = run_benchmarks::<T, F>(n) else {
+        let Some(res) = run_benchmarks::<T, F, SmallRangesDistribution>(n) else {
             break;
         };
         serde_json::to_writer(&mut *out, &res)?;
@@ -233,31 +252,8 @@ fn main() -> std::io::Result<()> {
 
     let mut out = BufWriter::new(File::create(format!("runs/{}.jsonl", args.run))?);
 
-    // run_family::<u32, StridedIndexSparseTableFamily<256, 256>>(&mut out)?;
-    // run_family::<u32, StridedIndexSparseTableFamily<32, 32>>(&mut out)?;
-    // run_family::<u32, StridedIndexAffixMasksSparseTableFamily<32, 32>>(&mut out)?;
-    run_family::<u32, StridedIndexMinHeapSparseTableFamily<32, 32>>(&mut out)?;
-    // run_family::<u32, StridedIndexSparseTableFamily<32, 32>>(&mut out)?;
-    // run_family::<u32, StridedIndexAffixMasksSparseTableFamily<32, 32>>(&mut out)?;
-    // run_family::<u32, StridedIndexSparseTableFamily<16, 16>>(&mut out)?;
-    // run_family::<u32, StridedIndexAffixMasksSparseTableFamily<16, 16>>(&mut out)?;
-
-    // // Sweep over block size B and over-sampling threshold S (const generics, so the grid is
-    // // spelled out). S > B is pointless: a same-block query spans fewer than B elements.
-    // macro_rules! sweep {
-    //     ($($b:literal => [$($s:literal),+]),+ $(,)?) => {
-    //         $($(
-    //             run_family::<u32, StridedIndexSparseTableFamily<$b, $s>>(&mut out)?;
-    //         )+)+
-    //     };
-    // }
-    // sweep! {
-    //     16 => [8, 16],
-    //     32 => [8, 16, 32],
-    //     64 => [8, 16, 32, 64],
-    //     128 => [16, 32, 64, 128],
-    //     256 => [32, 64, 128, 256],
-    // }
+    run_family::<u32, OffsetSparseTableFamily>(&mut out)?;
+    run_family::<u32, StridedIndexSparseTableFamily<256, 256>>(&mut out)?;
 
     Ok(())
 }

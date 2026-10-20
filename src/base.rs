@@ -4,7 +4,6 @@ pub trait RMQ<'a, T: Sized> {
         Self: Sized;
 
     fn rmq(&self, l: usize, r: usize) -> usize;
-    // TODO: Add fn len(&self) -> usize;
 }
 
 pub trait RMQFamily<T> {
@@ -29,8 +28,10 @@ macro_rules! rmq_family {
         $(#[$attr])*
         $vis struct $family $(<$(const $p: $pty),+>)?;
 
-        impl<T: $($bound)+ $($(, const $p: $pty)+)?> $crate::base::RMQFamily<T>
+        impl<T $($(, const $p: $pty)+)?> $crate::base::RMQFamily<T>
             for $family $(<$($p),+>)?
+        where
+            T: $($bound)+
         {
             type Rmq<'a>
                 = $rmq<'a, T $($(, $p)+)?>
