@@ -37,8 +37,6 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
             indices.push(idx);
         }
 
-        
-
         Self {
             data,
             sparse_table: OwningOffsetSparseTable::new(data, &indices),
@@ -152,8 +150,6 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
             let affix_seq = prefix_seq | suffix_seq;
             block_affix_masks.set_value(i / B, affix_seq as usize);
         }
-
-        
 
         Self {
             data,
@@ -276,8 +272,6 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
             indices.push(i + crate::cartesian_tree::rmq_on_minheap(id, B, 0, end - 1 - i));
         }
 
-        
-
         Self {
             data,
             sparse_table: OwningOffsetSparseTable::new(data, &indices),
@@ -349,8 +343,7 @@ fn in_window(stack: &BitFieldVecU<Box<[u64]>>, l: usize, r: usize) -> usize {
 
 impl<'a, T, const B: usize> MemoryUsage for BitBlocksSparseTable<'a, T, B> {
     fn memory_allocated(&self) -> usize {
-        std::mem::size_of_val(self.stack.as_ref())
-            + self.block_sparse_table.memory_allocated()
+        std::mem::size_of_val(self.stack.as_ref()) + self.block_sparse_table.memory_allocated()
     }
 }
 
