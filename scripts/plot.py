@@ -6,9 +6,9 @@
 """Plot build time, memory, query throughput time and query latency against n for each structure
 in one or more JSONL files.
 
-    uv run plot.py                                  # results.jsonl
-    uv run plot.py --stat median                    # plot medians instead of means
-    uv run plot.py results-abc123.jsonl results-def456.jsonl   # compare runs
+    uv run scripts/plot.py                                            # results.jsonl
+    uv run scripts/plot.py --stat median                              # plot medians instead of means
+    uv run scripts/plot.py results-abc123.jsonl results-def456.jsonl  # compare runs
 """
 
 import argparse

@@ -6,9 +6,9 @@
 """Plot the space-time tradeoff of each structure at a few fixed n: memory (bits / element)
 against query time (top row) and query latency (bottom row), one column per n.
 
-    uv run tradeoff.py                              # results.jsonl, n = 1e5, 1e6, 1e7
-    uv run tradeoff.py --ns 1e4 1e6 1e8
-    uv run tradeoff.py --stat median
+    uv run scripts/tradeoff.py                      # results.jsonl, n = 1e5, 1e6, 1e7
+    uv run scripts/tradeoff.py --ns 1e4 1e6 1e8
+    uv run scripts/tradeoff.py --stat median
 """
 
 import argparse

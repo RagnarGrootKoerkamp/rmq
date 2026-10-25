@@ -10,6 +10,9 @@ pub trait RMQFamily<T> {
     type Rmq<'a>: RMQ<'a, T> + MemoryUsage
     where
         T: 'a;
+
+    const NAME: &'static str;
+    const PARAMS: &'static [(&'static str, usize)] = &[];
 }
 
 /// Declares a family type for an RMQ structure of the form `Name<'a, T>`.
@@ -37,6 +40,10 @@ macro_rules! rmq_family {
                 = $rmq<'a, T $($(, $p)+)?>
             where
                 T: 'a;
+
+            const NAME: &'static str = stringify!($family);
+            $(const PARAMS: &'static [(&'static str, usize)] =
+                &[$((stringify!($p), $p as usize)),+];)?
         }
     };
     ($(#[$attr:meta])* $vis:vis $family:ident $(<$(const $p:ident : $pty:ty),+ $(,)?>)?
