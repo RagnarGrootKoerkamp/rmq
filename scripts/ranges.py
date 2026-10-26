@@ -12,9 +12,14 @@ Hover a bar for its exact numbers; click a legend entry to hide a structure.
     uv run scripts/ranges.py runs/abc_ranges.jsonl --metric latency --stat median
     uv run scripts/ranges.py runs/abc_ranges.jsonl --names OffsetSparseTable BitBlocks
     uv run scripts/ranges.py runs/abc_ranges.jsonl runs/def_ranges.jsonl    # compare runs
+    uv run scripts/ranges.py runs/abc_ranges.jsonl --weigh                  # contribution to a random query
+
+With --weigh, each band B is multiplied by the share of fully random queries (l <= r uniform)
+with r - l in band B, so the bars of a structure sum to its expected fully random query cost.
 """
 
 import argparse
+import colorsys
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -33,6 +38,7 @@ parser.add_argument("files", nargs="+")
 parser.add_argument("--metric", choices=METRICS, default="time")
 parser.add_argument("--stat", choices=["mean", "median"], default="mean")
 parser.add_argument("--names", nargs="*", help="only plot structures whose label contains one of these")
+parser.add_argument("--weigh", action="store_true", help="multiply band B by its share of a fully random query benchmark")
 parser.add_argument("-o", "--output", default="ranges.html")
 args = parser.parse_args()
 key, title = METRICS[args.metric]
@@ -40,6 +46,13 @@ key, title = METRICS[args.metric]
 
 def params_label(params):
     return "<" + ", ".join(f"{k}={v}" for k, v in sorted(params.items())) + ">" if params else ""
+
+
+def band_weight(b, n):
+    """Share of uniform pairs l <= r < n with r - l in [2^(B-1), 2^B): n - d pairs have r - l = d."""
+    lo, hi = 2 ** (b - 1), min(2**b, n)
+    c = max(hi - lo, 0)
+    return (c * n - (lo + hi - 1) * c / 2) / (n * (n + 1) / 2)
 
 
 # label -> {B: (value, std_dev)}, values in ns, with B parsed from the distribution name "2^B"
@@ -56,13 +69,22 @@ for path in args.files:
             if multi_file:
                 label += f" ({Path(path).stem})"
             b = int(r["distribution"].removeprefix("2^"))
-            series[label][b] = (r[key][args.stat] * 1e9, r[key]["std_dev"] * 1e9)
+            weight = band_weight(b, r["n"]) if args.weigh else 1
+            series[label][b] = (r[key][args.stat] * 1e9 * weight, r[key]["std_dev"] * 1e9 * weight)
             ns.add(r["n"])
 
 if not series:
     parser.error("no results match")
-if len(series) > len(COLORS):
-    parser.error(f"{len(series)} structures but only {len(COLORS)} colors; narrow them with --names")
+
+
+def color(i):
+    """The plot.py palette first, then hues spaced by the golden angle so extra structures stay distinct."""
+    if i < len(COLORS):
+        return COLORS[i]
+    h = (0.6 + (i - len(COLORS)) * 0.618034) % 1
+    l, s = (0.45, 0.65) if i % 2 else (0.6, 0.75)
+    return "#{:02x}{:02x}{:02x}".format(*(round(c * 255) for c in colorsys.hls_to_rgb(h, l, s)))
+
 
 labels = list(series)  # file order, so a structure keeps its color across --names filters of the same file
 bs = sorted({b for points in series.values() for b in points})
@@ -73,7 +95,7 @@ for i, label in enumerate(labels):
     present = [b for b in bs if b in points]
     fig.add_trace(
         go.Bar(
-            x=present, y=[points[b][0] for b in present], name=label, marker_color=COLORS[i],
+            x=present, y=[points[b][0] for b in present], name=label, marker_color=color(i),
             error_y=dict(array=[points[b][1] for b in present], color="#808080", thickness=1, width=0),
             customdata=[(b - 1, points[b][1]) for b in present],
             hovertemplate=(
@@ -92,11 +114,11 @@ fig.update_xaxes(
     showline=True, linecolor="#444",
 )
 fig.update_yaxes(
-    title_text=f"{args.stat} ± std dev (ns / query)", rangemode="tozero",
+    title_text=f"{'weighted ' if args.weigh else ''}{args.stat} ± std dev (ns / query)", rangemode="tozero",
     gridcolor="#e0e0e0", showline=True, linecolor="#444",
 )
 fig.update_layout(
-    template="plotly_white", width=1400, height=600, title_text=f"{title}, n = {n_label}",
+    template="plotly_white", width=1400, height=600, title_text=f"{title}{', weighted by random query share' if args.weigh else ''}, n = {n_label}",
     barmode="group", bargap=0.2, bargroupgap=0.1,  # bargroupgap leaves a gap between neighbours
     showlegend=len(labels) > 1,
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),

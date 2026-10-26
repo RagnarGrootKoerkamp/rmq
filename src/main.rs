@@ -385,7 +385,7 @@ struct Cli {
 enum Command {
     /// Run the benchmarks
     Main(MainArgs),
-    /// Benchmark OffsetSparseTable at n = 1e7 over range sizes 2^1 up to 2^24
+    /// Benchmark every family at n = 1e7 over range sizes 2^1 up to 2^24
     Ranges {
         run: String,
     },
@@ -437,11 +437,29 @@ fn run_ranges(run: &str) -> std::io::Result<()> {
     let mut out = BufWriter::new(File::create(format!("runs/{run}_ranges.jsonl"))?);
 
 
+    // Same families as run_all
+    // Baselines
+    run_ranges_once::<IndexSparseTableFamily>(&mut out)?;
     run_ranges_once::<OffsetSparseTableFamily>(&mut out)?;
-    run_ranges_once::<StridedIndexSparseTableFamily<16, 64>>(&mut out)?;
-    run_ranges_once::<StridedIndexSparseTableFamily<32, 64>>(&mut out)?;
+    run_ranges_once::<RMQTreeFamily>(&mut out)?;
+
+    // Block structures, compared at equal block sizes
+    run_ranges_once::<StridedIndexSparseTableFamily<8, 8>>(&mut out)?;
+    run_ranges_once::<StridedIndexSparseTableFamily<16, 16>>(&mut out)?;
+    run_ranges_once::<StridedIndexSparseTableFamily<32, 32>>(&mut out)?;
     run_ranges_once::<StridedIndexSparseTableFamily<64, 64>>(&mut out)?;
-    run_ranges_once::<StridedIndexSparseTableFamily<128, 128>>(&mut out)?;
+    run_ranges_once::<StridedIndexAffixMasksSparseTableFamily<8, 8>>(&mut out)?;
+    run_ranges_once::<StridedIndexAffixMasksSparseTableFamily<16, 16>>(&mut out)?;
+    run_ranges_once::<StridedIndexAffixMasksSparseTableFamily<32, 32>>(&mut out)?;
+    run_ranges_once::<StridedIndexAffixMasksSparseTableFamily<64, 64>>(&mut out)?;
+    run_ranges_once::<BitBlocksSparseTableFamily<8>>(&mut out)?;
+    run_ranges_once::<BitBlocksSparseTableFamily<16>>(&mut out)?;
+    run_ranges_once::<BitBlocksSparseTableFamily<32>>(&mut out)?;
+    run_ranges_once::<BitBlocksSparseTableFamily<64>>(&mut out)?;
+
+    // Block size chosen internally from n
+    run_ranges_once::<SparseTableCartesianBlocksFamily>(&mut out)?;
+    run_ranges_once::<SparseTable3Family>(&mut out)?;
 
     Ok(())
 }
