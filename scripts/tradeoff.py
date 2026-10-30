@@ -6,9 +6,9 @@
 """Plot the space-time tradeoff of each structure at a few fixed n: memory (bits / element)
 against query time (top row) and query latency (bottom row), one column per n.
 
-    uv run scripts/tradeoff.py                      # results.jsonl, n = 1e5, 1e6, 1e7
-    uv run scripts/tradeoff.py --ns 1e4 1e6 1e8
-    uv run scripts/tradeoff.py --stat median
+    uv run scripts/tradeoff.py sweep                      # n = 1e5, 1e6, 1e7
+    uv run scripts/tradeoff.py sweep --ns 1e4 1e6 1e8
+    uv run scripts/tradeoff.py sweep --stat median
 """
 
 import argparse
@@ -18,15 +18,18 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
+from bench_runs import existing_run
+
 # Same palette and name order as plot.py, so a structure has the same color in both.
 COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]
 
 parser = argparse.ArgumentParser()
-parser.add_argument("file", nargs="?", default="results.jsonl")
+parser.add_argument("file")
 parser.add_argument("--ns", nargs="+", type=float, default=[1e5, 1e6, 1e7])
 parser.add_argument("--stat", choices=["mean", "median"], default="mean")
 parser.add_argument("-o", "--output", default="tradeoff.png")
 args = parser.parse_args()
+args.file = existing_run(args.file)
 
 # structure -> {n: record}
 by_name = defaultdict(dict)

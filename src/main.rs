@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::hint::black_box;
 use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
@@ -391,6 +392,28 @@ fn parse_size(s: &str) -> Result<usize, String> {
     }
 }
 
+/// Creates `<runs dir>/<name>.jsonl`. The runs dir is $BENCH_RUNS if set, otherwise the
+/// data repo checked out at `runs/` in this crate.
+fn create_run_file(name: &str) -> std::io::Result<BufWriter<File>> {
+    let dir = match std::env::var_os("BENCH_RUNS") {
+        Some(dir) => PathBuf::from(dir),
+        None => Path::new(env!("CARGO_MANIFEST_DIR")).join("runs"),
+    };
+    if !dir.is_dir() {
+        eprintln!(
+            "runs directory {} does not exist. Clone the data repo there with\n    \
+             git clone --filter=blob:none https://github.com/lcjconte/rmq-data.git {}\n\
+             or set BENCH_RUNS to an existing clone.",
+            dir.display(),
+            dir.display(),
+        );
+        std::process::exit(1);
+    }
+    Ok(BufWriter::new(File::create(
+        dir.join(format!("{name}.jsonl")),
+    )?))
+}
+
 #[derive(Parser)]
 struct Cli {
     #[command(subcommand)]
@@ -427,10 +450,9 @@ fn run_main(args: MainArgs) -> std::io::Result<()> {
     prefer_performance_cores();
 
     // One file per distribution, since the plotting scripts don't distinguish them
-    let mut small_out = BufWriter::new(File::create(format!("runs/{}_small.jsonl", args.run))?);
-    let mut random_out = BufWriter::new(File::create(format!("runs/{}_random.jsonl", args.run))?);
-    let mut log_uniform_out =
-        BufWriter::new(File::create(format!("runs/{}_loguniform.jsonl", args.run))?);
+    let mut small_out = create_run_file(&format!("{}_small", args.run))?;
+    let mut random_out = create_run_file(&format!("{}_random", args.run))?;
+    let mut log_uniform_out = create_run_file(&format!("{}_loguniform", args.run))?;
 
     run_all(
         &mut small_out,
@@ -466,7 +488,7 @@ struct RangesResult {
 }
 
 fn run_ranges(run: &str) -> std::io::Result<()> {
-    let mut out = BufWriter::new(File::create(format!("runs/{run}_ranges.jsonl"))?);
+    let mut out = create_run_file(&format!("{run}_ranges"))?;
 
     // Same families as run_all
     // Baselines

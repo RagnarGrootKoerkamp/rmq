@@ -6,9 +6,9 @@
 """Plot build time, memory, query throughput time and query latency against n for each structure
 in one or more JSONL files.
 
-    uv run scripts/plot.py                                            # results.jsonl
-    uv run scripts/plot.py --stat median                              # plot medians instead of means
-    uv run scripts/plot.py results-abc123.jsonl results-def456.jsonl  # compare runs
+    uv run scripts/plot.py full_random                     # a run in the runs dir (see bench_runs.py)
+    uv run scripts/plot.py full_random --stat median       # plot medians instead of means
+    uv run scripts/plot.py full_random strided_default     # compare runs
 """
 
 import argparse
@@ -16,6 +16,7 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
+from bench_runs import existing_run
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
@@ -24,10 +25,11 @@ COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]
 LINESTYLES = ["-", "--", ":", "-."]
 
 parser = argparse.ArgumentParser()
-parser.add_argument("files", nargs="*", default=["results.jsonl"])
+parser.add_argument("files", nargs="+")
 parser.add_argument("--stat", choices=["mean", "median"], default="mean")
 parser.add_argument("-o", "--output", default="results.png")
 args = parser.parse_args()
+args.files = [existing_run(f) for f in args.files]
 
 # (structure, file) -> [(n, build, build_std, query, query_std, memory, latency, latency_std)]
 # latency is None for results written before query_latency existed.

@@ -7,14 +7,17 @@
 is refused if any result appears more than once, within a file or across files, so no
 measurement is silently duplicated or shadowed.
 
-    uv run scripts/merge_runs.py runs/a.jsonl runs/b.jsonl -o runs/merged.jsonl
+    uv run scripts/merge_runs.py a b -o merged
+
+Inputs and output are runs in the runs dir (see bench_runs.py).
 """
 
 import argparse
 import json
 import sys
 from collections import defaultdict
-from pathlib import Path
+
+from bench_runs import existing_run, run_path
 
 parser = argparse.ArgumentParser()
 parser.add_argument("files", nargs="+")
@@ -22,8 +25,9 @@ parser.add_argument("-o", "--output", required=True)
 parser.add_argument("-f", "--force", action="store_true", help="overwrite the output if it exists")
 args = parser.parse_args()
 
-output = Path(args.output)
-if any(output.resolve() == Path(path).resolve() for path in args.files):
+args.files = [existing_run(f) for f in args.files]
+output = run_path(args.output)
+if output in args.files:
     raise SystemExit("output must not be one of the inputs")
 if output.exists() and not args.force:
     raise SystemExit(f"{output} exists; pass --force to overwrite")

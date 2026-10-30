@@ -8,11 +8,11 @@
 (name + params) gets its own bar in every group, so table variants can be compared side by side.
 Hover a bar for its exact numbers; click a legend entry to hide a structure.
 
-    uv run scripts/ranges.py runs/abc_ranges.jsonl                          # query time
-    uv run scripts/ranges.py runs/abc_ranges.jsonl --metric latency --stat median
-    uv run scripts/ranges.py runs/abc_ranges.jsonl --names OffsetSparseTable BitBlocks
-    uv run scripts/ranges.py runs/abc_ranges.jsonl runs/def_ranges.jsonl    # compare runs
-    uv run scripts/ranges.py runs/abc_ranges.jsonl --weigh                  # contribution to a random query
+    uv run scripts/ranges.py abc_ranges                   # query time
+    uv run scripts/ranges.py abc_ranges --metric latency --stat median
+    uv run scripts/ranges.py abc_ranges --names OffsetSparseTable BitBlocks
+    uv run scripts/ranges.py abc_ranges def_ranges        # compare runs
+    uv run scripts/ranges.py abc_ranges --weigh           # contribution to a random query
 
 With --weigh, each band B is multiplied by the share of fully random queries (l <= r uniform)
 with r - l in band B, so the bars of a structure sum to its expected fully random query cost.
@@ -25,6 +25,8 @@ from collections import defaultdict
 from pathlib import Path
 
 import plotly.graph_objects as go
+
+from bench_runs import existing_run
 
 # Same palette as plot.py
 COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]
@@ -41,6 +43,7 @@ parser.add_argument("--names", nargs="*", help="only plot structures whose label
 parser.add_argument("--weigh", action="store_true", help="multiply band B by its share of a fully random query benchmark")
 parser.add_argument("-o", "--output", default="ranges.html")
 args = parser.parse_args()
+args.files = [existing_run(f) for f in args.files]
 key, title = METRICS[args.metric]
 
 

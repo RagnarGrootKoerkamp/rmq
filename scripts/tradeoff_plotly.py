@@ -7,12 +7,12 @@
 query time (left) and query latency (right). Hover a point for its exact numbers; click a
 legend entry to hide a structure in both panels.
 
-    uv run scripts/tradeoff_plotly.py                            # results.jsonl, n = 1e7
-    uv run scripts/tradeoff_plotly.py --n 1e6
-    uv run scripts/tradeoff_plotly.py --stat median -o tradeoff.html
-    uv run scripts/tradeoff_plotly.py runs/a.jsonl runs/b.jsonl  # compare runs
-    uv run scripts/tradeoff_plotly.py --vary B                   # connect configurations differing only in B
-    uv run scripts/tradeoff_plotly.py --vary S,B                 # per structure, vary the first of these it has
+    uv run scripts/tradeoff_plotly.py full_random                        # n = 1e7
+    uv run scripts/tradeoff_plotly.py full_random --n 1e6
+    uv run scripts/tradeoff_plotly.py full_random --stat median -o tradeoff.html
+    uv run scripts/tradeoff_plotly.py full_random full_loguniform        # compare runs
+    uv run scripts/tradeoff_plotly.py full_random --vary B               # connect configurations differing only in B
+    uv run scripts/tradeoff_plotly.py full_random --vary S,B             # per structure, vary the first of these it has
 
 All points of a structure are joined by one line, from the smallest to the largest value of the
 varied param. Without --vary, a structure is connected only if exactly one of its params takes
@@ -28,6 +28,8 @@ from pathlib import Path
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from bench_runs import existing_run
+
 # Same palette and name order as plot.py, so a structure has the same color in both.
 COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]
 # Per file, when comparing several.
@@ -35,7 +37,7 @@ SYMBOLS = ["circle", "square", "diamond", "triangle-up", "cross", "star"]
 DASHES = ["solid", "dash", "dot", "dashdot", "longdash", "longdashdot"]
 
 parser = argparse.ArgumentParser()
-parser.add_argument("files", nargs="*", default=["results.jsonl"])
+parser.add_argument("files", nargs="+")
 parser.add_argument("--n", type=float, default=1e7)
 parser.add_argument("--stat", choices=["mean", "median"], default="mean")
 parser.add_argument("-o", "--output", default="tradeoff.html")
@@ -43,6 +45,7 @@ parser.add_argument(
     "--vary", type=lambda s: s.split(","), default=[], metavar="PARAM[,PARAM...]",
 )
 args = parser.parse_args()
+args.files = [existing_run(f) for f in args.files]
 
 # (structure, file) -> {params: {n: record}}, params as a sorted tuple of (name, value)
 series = defaultdict(lambda: defaultdict(dict))
