@@ -4,4 +4,3 @@ mod rmq_tree;
 mod sparse_table;
 mod sparse_table2;
 mod sparse_table_blocks;
-mod sparse_table_levels;
