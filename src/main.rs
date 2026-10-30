@@ -57,6 +57,7 @@ enum RangeDistribution {
     Small,
     /// r - l in [2^(B-1), 2^B)
     PowerOfTwo(u32),
+    LogUniform,
 }
 
 impl RangeDistribution {
@@ -65,6 +66,7 @@ impl RangeDistribution {
             Self::FullyRandom => "fully_random".to_owned(),
             Self::Small => "small".to_owned(),
             Self::PowerOfTwo(b) => format!("2^{b}"),
+            Self::LogUniform => "log_uniform".to_owned(),
         }
     }
 
@@ -101,6 +103,15 @@ impl RangeDistribution {
                         return (l, r);
                     }
                 }
+            }
+            Self::LogUniform => {
+                // Length is log-uniform in [1, n]: pick a real exponent, then floor 2^e.
+                let max_exp = (n as f64).log2();
+                let e = rng.random_range(0.0..=max_exp); // inclusive so n == 1 doesn't panic
+                let len = (e.exp2() as usize).clamp(1, n);
+                // Uniform start among positions where the interval fits.
+                let l = rng.random_range(0..=n - len);
+                (l, l + len - 1)
             }
         }
     }
@@ -279,7 +290,12 @@ fn run_benchmarks<T: RMQValue, F: RMQFamily<T>>(
             QUERY_WARMUP_REPETITIONS + QUERY_REPETITIONS,
             || dist.sample_range(&mut query_rng, n),
         ) {
-            panic!("Verify failed: {} {:?} n={n} ({})", F::NAME, F::PARAMS, dist.name())
+            panic!(
+                "Verify failed: {} {:?} n={n} ({})",
+                F::NAME,
+                F::PARAMS,
+                dist.name()
+            )
         }
     }
 
@@ -386,9 +402,7 @@ enum Command {
     /// Run the benchmarks
     Main(MainArgs),
     /// Benchmark every family at n = 1e7 over range sizes 2^1 up to 2^24
-    Ranges {
-        run: String,
-    },
+    Ranges { run: String },
 }
 
 #[derive(clap::Args)]
@@ -415,9 +429,27 @@ fn run_main(args: MainArgs) -> std::io::Result<()> {
     // One file per distribution, since the plotting scripts don't distinguish them
     let mut small_out = BufWriter::new(File::create(format!("runs/{}_small.jsonl", args.run))?);
     let mut random_out = BufWriter::new(File::create(format!("runs/{}_random.jsonl", args.run))?);
+    let mut log_uniform_out =
+        BufWriter::new(File::create(format!("runs/{}_loguniform.jsonl", args.run))?);
 
-    run_all(&mut small_out, RangeDistribution::Small, args.min_n, args.max_n)?;
-    run_all(&mut random_out, RangeDistribution::FullyRandom, args.min_n, args.max_n)?;
+    run_all(
+        &mut small_out,
+        RangeDistribution::Small,
+        args.min_n,
+        args.max_n,
+    )?;
+    run_all(
+        &mut random_out,
+        RangeDistribution::FullyRandom,
+        args.min_n,
+        args.max_n,
+    )?;
+    run_all(
+        &mut log_uniform_out,
+        RangeDistribution::LogUniform,
+        args.min_n,
+        args.max_n,
+    )?;
 
     Ok(())
 }
@@ -433,9 +465,8 @@ struct RangesResult {
     query_latency: DistStatistics,
 }
 
-fn run_ranges(run: &str) -> std::io::Result<()> { 
+fn run_ranges(run: &str) -> std::io::Result<()> {
     let mut out = BufWriter::new(File::create(format!("runs/{run}_ranges.jsonl"))?);
-
 
     // Same families as run_all
     // Baselines

@@ -1,5 +1,10 @@
 use crate::base::{MemoryUsage, RMQ, TwoArgMin};
 
+use sux::{
+    bits::BitFieldVec,
+    traits::{SliceByValue, SliceByValueMut},
+};
+
 pub struct RMQTree<'a, T> {
     n: usize,
     data: &'a [T],
@@ -68,4 +73,81 @@ impl<'a, T: Ord> RMQ<'a, T> for RMQTree<'a, T> {
 
 crate::rmq_family! {
     pub RMQTreeFamily => RMQTree
+}
+
+pub struct PackedRMQTree<'a, T> {
+    n: usize,
+    data: &'a [T],
+    tree: BitFieldVec,
+}
+
+impl<'a, T> MemoryUsage for PackedRMQTree<'a, T> {
+    fn memory_allocated(&self) -> usize {
+        self.tree.memory_allocated()
+    }
+}
+
+impl<'a, T: Ord> RMQ<'a, T> for PackedRMQTree<'a, T> {
+    fn new(data: &'a [T]) -> Self {
+        let n = data.len();
+        // Every stored index is < n, so n - 1 bounds the width.
+        let width = (usize::BITS - n.saturating_sub(1).leading_zeros()).max(1) as usize;
+        let mut tree = Self {
+            n,
+            data,
+            tree: BitFieldVec::new(width, n),
+        };
+        for i in (1..n).rev() {
+            let left_index = if 2 * i < n {
+                unsafe { tree.tree.get_value_unchecked(2 * i) }
+            } else {
+                2 * i - n
+            };
+            let right_index = if 2 * i + 1 < n {
+                unsafe { tree.tree.get_value_unchecked(2 * i + 1) }
+            } else {
+                2 * i + 1 - n
+            };
+            tree.tree
+                .set_value(i, tree.data.argmin(left_index, right_index));
+        }
+        tree
+    }
+
+    // Queries [l, r]
+    fn rmq(&self, mut l: usize, mut r: usize) -> usize {
+        let mut left_min = l;
+        let mut right_min = r;
+        l += self.n;
+        r += self.n + 1;
+        if l % 2 == 1 {
+            l += 1;
+        }
+        if r % 2 == 1 {
+            r -= 1;
+        }
+        l /= 2;
+        r /= 2;
+        while l < r {
+            if l % 2 == 1 {
+                left_min = self
+                    .data
+                    .argmin(left_min, unsafe { self.tree.get_value_unchecked(l) });
+                l += 1;
+            }
+            if r % 2 == 1 {
+                right_min = self
+                    .data
+                    .argmin(unsafe { self.tree.get_value_unchecked(r - 1) }, right_min);
+                r -= 1;
+            }
+            l /= 2;
+            r /= 2;
+        }
+        self.data.argmin(left_min, right_min)
+    }
+}
+
+crate::rmq_family! {
+    pub PackedRMQTreeFamily => PackedRMQTree
 }
