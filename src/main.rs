@@ -447,6 +447,7 @@ fn main() -> std::io::Result<()> {
 }
 
 fn run_main(args: MainArgs) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
     prefer_performance_cores();
 
     // One file per distribution, since the plotting scripts don't distinguish them
@@ -518,6 +519,7 @@ fn run_ranges(run: &str) -> std::io::Result<()> {
 }
 
 fn run_ranges_once<Family: RMQFamily<u32>>(out: &mut BufWriter<File>) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
     prefer_performance_cores();
 
     let n = 10_000_000;
