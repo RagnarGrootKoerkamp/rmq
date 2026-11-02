@@ -6,7 +6,8 @@ use std::{
 use crate::base::{BuildableSlice, MemoryUsage, RMQ, TwoArgMin};
 
 use sux::{
-    bits::{BitFieldVec, BitFieldVecU}, traits::{SliceByValue, SliceByValueMut, TryIntoUnaligned},
+    bits::{BitFieldVec, BitFieldVecU},
+    traits::{SliceByValue, SliceByValueMut, TryIntoUnaligned},
 };
 
 pub struct OffsetSparseTable<'a, T> {
@@ -29,7 +30,8 @@ impl<'a, T: Ord> RMQ<'a, T> for OffsetSparseTable<'a, T> {
     fn new(data: &'a [T]) -> Self {
         let n = data.len();
         let k_max = n.ilog2() as usize;
-        let mut offsets: Vec<BitFieldVec<Box<[usize]>>> = (1..=k_max).map(|k| BitFieldVec::new_padded(k, n)).collect();
+        let mut offsets: Vec<BitFieldVec<Box<[usize]>>> =
+            (1..=k_max).map(|k| BitFieldVec::new_padded(k, n)).collect();
         for i in 0..n - 1 {
             offsets[0].set_value(i, data.argmin(i, i + 1) - i);
         }
@@ -38,14 +40,19 @@ impl<'a, T: Ord> RMQ<'a, T> for OffsetSparseTable<'a, T> {
                 let (loffset, roffset) = unsafe {
                     (
                         offsets[k - 2].get_value_unchecked(i),
-                        offsets[k - 2].get_value_unchecked(i + (1 << (k - 1)))
-                            + (1 << (k - 1)),
+                        offsets[k - 2].get_value_unchecked(i + (1 << (k - 1))) + (1 << (k - 1)),
                     )
                 };
                 offsets[k - 1].set_value(i, data.argmin(i + loffset, i + roffset) - i);
             }
         }
-        OffsetSparseTable { data, offsets: offsets.into_iter().map(|x| {x.try_into_unaligned().unwrap()}).collect() }
+        OffsetSparseTable {
+            data,
+            offsets: offsets
+                .into_iter()
+                .map(|x| x.try_into_unaligned().unwrap())
+                .collect(),
+        }
     }
 
     // Queries [l, r]
@@ -166,7 +173,8 @@ impl<'a, T: Ord> PositionOffsetSparseTable<'a, T> {
         for i in 0..n {
             packed_positions.set_value(i, positions[i]);
         }
-        let mut offsets: Vec<BitFieldVec<Box<[usize]>>> = (1..=k_max).map(|k| BitFieldVec::new_padded(k, n)).collect();
+        let mut offsets: Vec<BitFieldVec<Box<[usize]>>> =
+            (1..=k_max).map(|k| BitFieldVec::new_padded(k, n)).collect();
 
         for k in 1..=k_max {
             let half = 1 << (k - 1);
@@ -197,7 +205,10 @@ impl<'a, T: Ord> PositionOffsetSparseTable<'a, T> {
         Self {
             data,
             positions: packed_positions.try_into_unaligned().unwrap(),
-            offsets: offsets.into_iter().map(|x| { x.try_into_unaligned().unwrap() }).collect(),
+            offsets: offsets
+                .into_iter()
+                .map(|x| x.try_into_unaligned().unwrap())
+                .collect(),
         }
     }
 

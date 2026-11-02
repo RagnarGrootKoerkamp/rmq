@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::env;
 use std::fs::File;
 use std::hint::black_box;
 use std::io::{BufWriter, Write};
@@ -52,7 +53,7 @@ fn get_random_permutation<T: RMQValue>(rng: &mut dyn Rng, n: usize) -> Vec<T> {
     v
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum RangeDistribution {
     FullyRandom,
     /// r - l < 128
@@ -132,7 +133,7 @@ struct BenchmarkResult {
     params: BTreeMap<&'static str, usize>,
     distribution: String,
     n: usize,
-    build_time: DistStatistics,
+    build_time: Option<DistStatistics>,
     query_time: DistStatistics,
     query_latency: DistStatistics,
     memory_bytes: usize,
@@ -265,20 +266,34 @@ fn run_benchmarks<T: RMQValue, F: RMQFamily<T>>(
     dist: RangeDistribution,
     n: usize,
     verify: bool,
+    data: Option<&[T]>,
+    include_build: bool,
 ) -> Option<BenchmarkResult> {
     let mut rng = get_rng();
-    let data = get_random_permutation(&mut rng, n);
+    let v = if data.is_none() {
+        get_random_permutation(&mut rng, n)
+    } else {
+        vec![]
+    };
+    let data = data.unwrap_or(&v);
+
+    let build_time = if include_build {
+        Some(time_function(
+            |_| F::Rmq::new(black_box(&data)),
+            0,
+            1,
+            1,
+            || {},
+        ))
+    } else {
+        None
+    };
 
     let rmq = F::Rmq::new(&data);
     let memory_bytes = rmq.memory_total();
-    if memory_bytes > MEMORY_THRESHOLD_BYTES {
+    if env::var("IGNORE_MEM_THRESHOLD").is_err() && memory_bytes > MEMORY_THRESHOLD_BYTES {
         return None;
     }
-    drop(rmq);
-
-    let build_time = time_function(|_| F::Rmq::new(black_box(&data)), 0, 1, 1, || {});
-
-    let rmq = F::Rmq::new(&data);
 
     let (query_time, query_latency) = time_queries(&rmq, dist, n);
 
@@ -329,16 +344,19 @@ fn run_family<T: RMQValue, F: RMQFamily<T>>(
     min_n: usize,
     max_n: usize,
 ) -> std::io::Result<()> {
+    let mut last_min = true;
     // Tenth-of-a-decade steps: 1000, 1259, 1585, ...
     for i in 20.. {
         let n = 10f64.powf(i as f64 / 10.0).round() as usize;
-        if n > max_n {
+        if n > max_n && !last_min {
             break;
         }
         if n < min_n {
             continue;
+        } else {
+            last_min = false;
         }
-        let Some(res) = run_benchmarks::<T, F>(dist, n, true) else {
+        let Some(res) = run_benchmarks::<T, F>(dist, n, true, None, true) else {
             break;
         };
         serde_json::to_writer(&mut *out, &res)?;
@@ -348,14 +366,31 @@ fn run_family<T: RMQValue, F: RMQFamily<T>>(
     Ok(())
 }
 
-/// Runs `run_family` once per listed `B`, substituting it for each `B` in the family's parameters:
-/// `sweep_family!(&mut out, dist, min_n, max_n, u32, Family<B, B> for B in [8, 16]);`
-macro_rules! sweep_family {
-    ($out:expr, $dist:expr, $min_n:expr, $max_n:expr, $t:ty, $family:ident<B, B> for B in [$($b:literal),+ $(,)?] $(,)?) => {
-        $( run_family::<$t, $family<$b, $b>>($out, $dist, $min_n, $max_n)?; )+
-    };
-    ($out:expr, $dist:expr, $min_n:expr, $max_n:expr, $t:ty, $family:ident<B> for B in [$($b:literal),+ $(,)?] $(,)?) => {
-        $( run_family::<$t, $family<$b>>($out, $dist, $min_n, $max_n)?; )+
+fn run_family_on_genome<T: RMQValue, F: RMQFamily<T>>(
+    out: &mut impl Write,
+    dist: RangeDistribution,
+    genome_lcp: &[T],
+) -> std::io::Result<()> {
+    eprintln!(
+        "run_family_on_genome::<{}, {}>({:?})",
+        std::any::type_name::<T>(),
+        std::any::type_name::<F>(),
+        dist
+    );
+    let res =
+        run_benchmarks::<T, F>(dist, genome_lcp.len(), false, Some(genome_lcp), false).unwrap();
+    serde_json::to_writer(&mut *out, &res)?;
+    out.write_all(b"\n")?;
+    out.flush()?; // keep finished results if a later run crashes
+
+    Ok(())
+}
+
+/// `for_each!(B in [8, 16] { run_family::<u32, Fam<B, B>>(...)?; })`
+/// runs the body once per value, with `B` bound as a `const usize`.
+macro_rules! for_each {
+    ($name:ident in [$($v:expr),+ $(,)?] $body:block) => {
+        $( { const $name: usize = $v; $body } )+
     };
 }
 
@@ -372,13 +407,49 @@ fn run_all(
     run_family::<u32, RMQTreeFamily>(out, dist, min_n, max_n)?;
 
     // Block structures, compared at equal block sizes
-    sweep_family!(out, dist, min_n, max_n, u32, StridedIndexSparseTableFamily<B, B> for B in [8, 16, 32, 64]);
-    sweep_family!(out, dist, min_n, max_n, u32, StridedIndexAffixMasksSparseTableFamily<B, B> for B in [8, 16, 32, 64]);
-    sweep_family!(out, dist, min_n, max_n, u32, BitBlocksSparseTableFamily<B> for B in [8, 16, 32, 64]);
+    for_each!(B in [8, 16, 32, 64] {
+        run_family::<u32, StridedIndexSparseTableFamily<B, B>>(out, dist, min_n, max_n)?;
+    });
+    for_each!(B in [8, 16, 32, 64] {
+        run_family::<u32, StridedIndexAffixMasksSparseTableFamily<B, B>>(out, dist, min_n, max_n)?;
+    });
+    for_each!(B in [8, 16, 32, 64] {
+        run_family::<u32, BitBlocksSparseTableFamily<B>>(out, dist, min_n, max_n)?;
+    });
 
     // Block size chosen internally from n
     run_family::<u32, SparseTableCartesianBlocksFamily>(out, dist, min_n, max_n)?;
     run_family::<u32, SparseTable3Family>(out, dist, min_n, max_n)?;
+
+    Ok(())
+}
+
+fn run_all_genome<T>(
+    out: &mut impl Write,
+    dist: RangeDistribution,
+    genome_lcp: &[T],
+) -> std::io::Result<()>
+where
+    T: RMQValue,
+{
+    // Baselines
+    run_family_on_genome::<T, OffsetSparseTableFamily>(out, dist, genome_lcp)?;
+    run_family_on_genome::<T, RMQTreeFamily>(out, dist, genome_lcp)?;
+
+    // Block structures, compared at equal block sizes
+    for_each!(B in [8, 16, 32, 64, 128, 256, 512, 1024] {
+        run_family_on_genome::<T, StridedIndexSparseTableFamily<B, B>>(out, dist, genome_lcp)?;
+    });
+    for_each!(B in [8, 16, 32, 64] {
+        run_family_on_genome::<T, StridedIndexAffixMasksSparseTableFamily<B, B>>(out, dist, genome_lcp)?;
+    });
+    for_each!(B in [8, 16, 32, 64] {
+        run_family_on_genome::<T, BitBlocksSparseTableFamily<B>>(out, dist, genome_lcp)?;
+    });
+
+    // Block size chosen internally from n
+    run_family_on_genome::<T, SparseTableCartesianBlocksFamily>(out, dist, genome_lcp)?;
+    run_family_on_genome::<T, SparseTable3Family>(out, dist, genome_lcp)?;
 
     Ok(())
 }
@@ -427,8 +498,12 @@ enum Command {
     /// Run the benchmarks
     Main(MainArgs),
     /// Benchmark every family at n = 1e7 over range sizes 2^1 up to 2^24
-    Ranges { run: String },
-    Genome,
+    Ranges {
+        run: String,
+    },
+    Genome {
+        run: String,
+    },
 }
 
 #[derive(clap::Args)]
@@ -446,7 +521,7 @@ fn main() -> std::io::Result<()> {
     match Cli::parse().command {
         Command::Main(args) => run_main(args),
         Command::Ranges { run } => run_ranges(&run),
-        Command::Genome => read_file(),
+        Command::Genome { run } => run_genome(&run),
     }
 }
 
@@ -553,10 +628,10 @@ fn run_ranges_once<Family: RMQFamily<u32>>(out: &mut BufWriter<File>) -> std::io
     Ok(())
 }
 
-fn read_file() -> std::io::Result<()> {
+fn run_genome(run: &str) -> std::io::Result<()> {
     let filename = "ncbi_dataset/genome.fna";
     let mut reader = parse_fastx_file(&filename).unwrap();
-    
+
     let mut v: Vec<u8> = Vec::new();
     while let Some(record) = reader.next() {
         let mut seq = record.unwrap().seq().to_vec();
@@ -565,35 +640,50 @@ fn read_file() -> std::io::Result<()> {
         }
     }
 
-    sa_and_lcp(&v);
+    let lcp = sa_and_lcp(&v);
+
+    // One file per distribution, since the plotting scripts don't distinguish them
+    let mut small_out = create_run_file(&format!("{}_small", run))?;
+    let mut random_out = create_run_file(&format!("{}_random", run))?;
+    let mut log_uniform_out = create_run_file(&format!("{}_loguniform", run))?;
+
+    run_all_genome(&mut small_out, RangeDistribution::Small, &lcp)?;
+    run_all_genome(&mut random_out, RangeDistribution::FullyRandom, &lcp)?;
+    run_all_genome(&mut log_uniform_out, RangeDistribution::LogUniform, &lcp)?;
 
     Ok(())
 }
 
-pub fn sa_and_lcp(t: &[u8]) {
+pub fn sa_and_lcp(t: &[u8]) -> Vec<u32> {
     eprintln!("building sa..");
     let sa_builder = libsais::SuffixArrayConstruction::for_text(t)
         .in_owned_buffer64()
         .multi_threaded(libsais::ThreadCount::openmp_default())
         .run()
         .unwrap();
-    eprintln!("SA:   {:.3} GB", std::mem::size_of_val(sa_builder.suffix_array()) as f32 / 1e9);
+    eprintln!(
+        "SA:   {:.3} GB",
+        std::mem::size_of_val(sa_builder.suffix_array()) as f32 / 1e9
+    );
 
     eprintln!("building plcp..");
-    let plcp_builder = sa_builder.plcp_construction()
-    .multi_threaded(libsais::ThreadCount::openmp_default())
-    .run()
-    .unwrap();
-    eprintln!("PLCP: {:.3} GB", std::mem::size_of_val(plcp_builder.plcp()) as f32 / 1e9);
+    let plcp_builder = sa_builder
+        .plcp_construction()
+        .multi_threaded(libsais::ThreadCount::openmp_default())
+        .run()
+        .unwrap();
+    eprintln!(
+        "PLCP: {:.3} GB",
+        std::mem::size_of_val(plcp_builder.plcp()) as f32 / 1e9
+    );
 
-    let res_with_plcp_and_lcp = plcp_builder.lcp_construction()
+    let res_with_plcp_and_lcp = plcp_builder
+        .lcp_construction()
         .multi_threaded(libsais::ThreadCount::openmp_default())
         .run()
         .unwrap();
 
     let (_, lcp, _, r) = res_with_plcp_and_lcp.into_parts();
-    
-    let maxv = lcp.iter().max().unwrap();
 
-    println!("{}", maxv);
+    lcp.into_iter().map(|x| x.try_into().unwrap()).collect()
 }
