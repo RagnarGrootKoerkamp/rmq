@@ -5,7 +5,7 @@ use sux::{
 
 use crate::{
     base::{MemoryUsage, RMQ, TwoArgMin},
-    sparse_table::{IndexSparseTable, OwningOffsetSparseTable},
+    sparse_table::{IndexST, OwningOffsetSparseTable},
 };
 
 pub struct StridedIndexSparseTable<'a, T, const B: usize, const S: usize> {
@@ -329,7 +329,7 @@ crate::rmq_family! {
 pub struct BitBlocksSparseTable<'a, T, const B: usize> {
     data: &'a [T],
     stack: BitFieldVecU<Box<[u64]>>,
-    block_sparse_table: IndexSparseTable<'a, T>,
+    block_sparse_table: IndexST<'a, T>,
 }
 
 // Leftmost argmin of [l, r], which must satisfy r - l < B.
@@ -383,7 +383,7 @@ impl<'a, T: Ord, const B: usize> RMQ<'a, T> for BitBlocksSparseTable<'a, T, B> {
         BitBlocksSparseTable {
             data,
             stack,
-            block_sparse_table: IndexSparseTable::new(data, &indices),
+            block_sparse_table: IndexST::new(data, &indices),
         }
     }
 

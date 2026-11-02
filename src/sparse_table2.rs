@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     base::{MemoryUsage, RMQ, TwoArgMin},
     cartesian_tree::convert_to_minheap,
-    sparse_table::{IndexSparseTable, PositionOffsetSparseTable},
+    sparse_table::{CustomOffsetST, Getter, IndexST, PositionOffsetSparseTable},
 };
 
 use sux::{
@@ -11,98 +11,35 @@ use sux::{
     traits::{SliceByValue, SliceByValueMut},
 };
 
-pub struct SparseTableCartesianBlocks<'a, T> {
-    b: usize,
+pub struct STLookupBlocksInner<'a, T> {
     data: &'a [T],
+    b: usize,
     block_id: Vec<usize>,
-    block_responses: Vec<usize>,
-    block_sparse_table: IndexSparseTable<'a, T>,
+    block_responses: Vec<u16>,
+}
+impl<'a, T: Copy> Getter<T> for STLookupBlocksInner<'a, T> {
+    #[inline]
+    fn get(&self, i: usize) -> T {
+        let iblock_idx = self.block_responses[self.block_id[i] + _range_index(0, self.b - 1)];
+        return self.data[self.b * i + iblock_idx as usize];
+    }
+}
+
+impl<'a, T: Ord> STLookupBlocksInner<'a, T> {
+    #[inline]
+    fn in_block(&self, block: usize, l: usize, r: usize) -> usize {
+        block * self.b + self.block_responses[self.block_id[block] + _range_index(l, r)] as usize
+    }
+}
+
+pub struct SparseTableCartesianBlocks<'a, T> {
+    block_sparse_table: CustomOffsetST<'a, T, STLookupBlocksInner<'a, T>>,
 }
 
 #[inline]
 fn _range_index(l: usize, r: usize) -> usize {
     debug_assert!(l <= r);
     r * (r + 1) / 2 + l
-}
-
-impl<'a, T: Ord> SparseTableCartesianBlocks<'a, T> {
-    #[inline]
-    fn in_block(&self, block: usize, l: usize, r: usize) -> usize {
-        block * self.b + self.block_responses[self.block_id[block] + _range_index(l, r)]
-    }
-}
-
-impl<'a, T> MemoryUsage for SparseTableCartesianBlocks<'a, T> {
-    fn memory_allocated(&self) -> usize {
-        (self.block_id.len() + self.block_responses.len()) * std::mem::size_of::<usize>()
-            + self.block_sparse_table.memory_allocated()
-    }
-}
-
-impl<'a, T: Ord> RMQ<'a, T> for SparseTableCartesianBlocks<'a, T> {
-    fn new(data: &'a [T]) -> Self
-    where
-        Self: Sized,
-    {
-        let n = data.len();
-        let b = 1usize.max(((n as f64).log2() / 4f64).floor() as usize);
-        let lr_pairs = b * (b + 1) / 2;
-
-        let mut id_map = vec![usize::MAX; 1 << (2 * b)];
-        let mut block_responses: Vec<usize> = vec![];
-        let mut block_id = vec![];
-        let mut indices = vec![];
-
-        for i in (0..n).step_by(b) {
-            let block = &data[i..n.min(i + b)];
-            let id = convert_to_minheap(block, b) as usize;
-            if id_map[id] == usize::MAX {
-                let offset = block_responses.len();
-                id_map[id] = offset;
-                block_responses.resize(offset + lr_pairs, 0);
-                // Only the last block can be short, and nothing queries past its end,
-                // so ranges beyond it can stay unfilled.
-                for l in 0..block.len() {
-                    let mut min_idx = l;
-                    for r in l..block.len() {
-                        min_idx = block.argmin(min_idx, r);
-                        block_responses[offset + _range_index(l, r)] = min_idx;
-                    }
-                }
-            }
-
-            block_id.push(id_map[id]);
-            indices.push(i + block_responses[id_map[id] + _range_index(0, block.len() - 1)]);
-        }
-        SparseTableCartesianBlocks {
-            b,
-            data,
-            block_id,
-            block_responses,
-            block_sparse_table: IndexSparseTable::new(data, &indices),
-        }
-    }
-
-    fn rmq(&self, l: usize, r: usize) -> usize {
-        let l_block = l / self.b;
-        let r_block = r / self.b;
-
-        if l_block == r_block {
-            self.in_block(l_block, l % self.b, r % self.b)
-        } else {
-            let mut ans = self.in_block(l_block, l % self.b, self.b - 1);
-            if r_block - l_block > 1 {
-                ans = self
-                    .data
-                    .argmin(ans, self.block_sparse_table.rmq(l_block + 1, r_block - 1));
-            }
-            self.data.argmin(ans, self.in_block(r_block, 0, r % self.b))
-        }
-    }
-}
-
-crate::rmq_family! {
-    pub SparseTableCartesianBlocksFamily => SparseTableCartesianBlocks
 }
 
 /// Fills `out` with in-block answers for every range of a size-`s` block.
@@ -118,6 +55,82 @@ fn fill_block_answers<T: Ord>(block: &[T], s: usize, out: &mut [u16]) {
             out[_range_index(l, r)] = min_idx as u16;
         }
     }
+}
+
+impl<'a, T> MemoryUsage for SparseTableCartesianBlocks<'a, T> {
+    fn memory_allocated(&self) -> usize {
+        let inner = &self.block_sparse_table.getter;
+        inner.block_id.memory_allocated()
+            + inner.block_responses.memory_allocated()
+            + self.block_sparse_table.memory_allocated()
+    }
+}
+
+impl<'a, T: Ord + Copy> RMQ<'a, T> for SparseTableCartesianBlocks<'a, T> {
+    fn new(data: &'a [T]) -> Self
+    where
+        Self: Sized,
+    {
+        let n = data.len();
+        let b = 1usize.max(((n as f64).log2() / 4f64).floor() as usize);
+        let lr_pairs = b * (b + 1) / 2;
+
+        let mut id_map: HashMap<u64, usize> = HashMap::new();
+        let mut block_responses: Vec<u16> = vec![];
+        let mut block_id = vec![];
+        let mut indices = vec![];
+
+        for i in (0..n).step_by(b) {
+            let block = &data[i..n.min(i + b)];
+            let id = convert_to_minheap(block, b);
+            if let std::collections::hash_map::Entry::Vacant(e) = id_map.entry(id) {
+                let offset = block_responses.len();
+                e.insert(offset);
+                block_responses.resize(offset + lr_pairs, 0);
+                fill_block_answers(block, b, &mut block_responses[offset..]);
+            }
+
+            block_id.push(id_map[&id]);
+            indices
+                .push(i + block_responses[id_map[&id] + _range_index(0, block.len() - 1)] as usize);
+        }
+
+        let n2 = block_id.len();
+        let inner = STLookupBlocksInner {
+            data,
+            b,
+            block_id,
+            block_responses,
+        };
+        SparseTableCartesianBlocks {
+            block_sparse_table: CustomOffsetST::new(n2, inner),
+        }
+    }
+
+    fn rmq(&self, l: usize, r: usize) -> usize {
+        let inner = &self.block_sparse_table.getter;
+        let l_block = l / inner.b;
+        let r_block = r / inner.b;
+
+        if l_block == r_block {
+            inner.in_block(l_block, l % inner.b, r % inner.b)
+        } else {
+            let mut ans = inner.in_block(l_block, l % inner.b, inner.b - 1);
+            if r_block - l_block > 1 {
+                let block = self.block_sparse_table.rmq(l_block + 1, r_block - 1);
+                ans = inner
+                    .data
+                    .argmin(ans, inner.in_block(block, 0, inner.b - 1));
+            }
+            inner
+                .data
+                .argmin(ans, inner.in_block(r_block, 0, r % inner.b))
+        }
+    }
+}
+
+crate::rmq_family! {
+    pub SparseTableCartesianBlocksFamily => SparseTableCartesianBlocks where T: Ord + Copy
 }
 
 pub struct SparseTable3<'a, T> {

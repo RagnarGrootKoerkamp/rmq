@@ -13,9 +13,9 @@ pub mod testing;
 pub use naive::NaiveRMQFamily;
 pub use rmq_tree::{PackedRMQTreeFamily, RMQTreeFamily};
 pub use sparse_table::{
-    IndexSparseTableFamily, OffsetSparseTableFamily, OwningOffsetSparseTableFamily,
-    PackedIndexSparseTableFamily, PackedValueSparseTableFamily, PositionOffsetSparseTableFamily,
-    ValueSparseTableFamily,
+    CustomOffsetSparseTableFamily, IndexSparseTableFamily, OffsetSparseTableFamily,
+    OwningOffsetSparseTableFamily, PackedIndexSparseTableFamily, PackedValueSparseTableFamily,
+    PositionOffsetSparseTableFamily, ValueSparseTableFamily,
 };
 pub use sparse_table_blocks::{
     BitBlocksSparseTableFamily, StridedIndexAffixMasksSparseTableFamily,

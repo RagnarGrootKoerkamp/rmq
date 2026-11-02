@@ -1,3 +1,8 @@
+use sux::{
+    bits::{BitFieldVec, BitFieldVecU},
+    traits::{BitWidth, SliceByValue, SliceByValueMut, TryIntoUnaligned, Word},
+};
+
 pub trait RMQ<'a, T: Sized> {
     fn new(data: &'a [T]) -> Self
     where
@@ -76,10 +81,75 @@ pub trait MemoryUsage: Sized {
     }
 }
 
+impl<T> MemoryUsage for Vec<T>
+where
+    T: Sized,
+{
+    fn memory_allocated(&self) -> usize {
+        self.len() * size_of::<T>()
+    }
+}
+
 impl<W: sux::traits::Word> MemoryUsage for sux::bits::BitFieldVec<Vec<W>> {
     /// Bytes used by the packed backing words; ignores struct and capacity overhead.
     fn memory_allocated(&self) -> usize {
         let word_bits = 8 * size_of::<W>();
         (self.len() * self.bit_width()).div_ceil(word_bits) * size_of::<W>()
+    }
+}
+
+impl<W: sux::traits::Word> MemoryUsage for sux::bits::BitFieldVec<Box<[W]>> {
+    /// Bytes used by the packed backing words; ignores struct and capacity overhead.
+    fn memory_allocated(&self) -> usize {
+        let word_bits = 8 * size_of::<W>();
+        (self.len() * self.bit_width()).div_ceil(word_bits) * size_of::<W>()
+    }
+}
+
+impl<W: Word> MemoryUsage for BitFieldVecU<Box<[W]>> {
+    /// Bytes used by the packed backing words; ignores struct and padding overhead.
+    fn memory_allocated(&self) -> usize {
+        let word_bits = 8 * size_of::<W>();
+        (self.len() * self.bit_width()).div_ceil(word_bits) * size_of::<W>()
+    }
+}
+
+/// A by-value slice that is filled through a mutable `Builder` and then frozen.
+pub trait BuildableSlice: SliceByValue + Sized {
+    type Builder: SliceByValueMut<Value = Self::Value>;
+    fn new_builder(n: usize, bit_width: usize) -> Self::Builder;
+    fn build(builder: Self::Builder) -> Self;
+}
+
+impl<W: Word> BuildableSlice for Vec<W> {
+    type Builder = Self;
+    fn new_builder(n: usize, _bit_width: usize) -> Self {
+        vec![W::ZERO; n]
+    }
+    fn build(builder: Self) -> Self {
+        builder
+    }
+}
+
+impl<W: Word> BuildableSlice for BitFieldVec<Box<[W]>> {
+    type Builder = Self;
+    fn new_builder(n: usize, bit_width: usize) -> Self {
+        BitFieldVec::new_padded(bit_width, n)
+    }
+    fn build(builder: Self) -> Self {
+        builder
+    }
+}
+
+impl<W: Word> BuildableSlice for BitFieldVecU<Box<[W]>> {
+    type Builder = BitFieldVec<Box<[W]>>;
+    fn new_builder(n: usize, bit_width: usize) -> Self::Builder {
+        BitFieldVec::new_padded(bit_width, n)
+    }
+    fn build(builder: Self::Builder) -> Self {
+        // new_padded already has the padding word, so no reallocation here
+        builder
+            .try_into_unaligned()
+            .expect("bit width unsupported for unaligned reads")
     }
 }

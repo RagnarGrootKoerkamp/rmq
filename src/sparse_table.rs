@@ -3,23 +3,20 @@ use std::{
     mem::{ManuallyDrop, MaybeUninit},
 };
 
-use crate::base::{MemoryUsage, RMQ, TwoArgMin};
+use crate::base::{BuildableSlice, MemoryUsage, RMQ, TwoArgMin};
 
 use sux::{
-    bits::BitFieldVec,
-    traits::{SliceByValue, SliceByValueMut},
+    bits::{BitFieldVec, BitFieldVecU}, traits::{SliceByValue, SliceByValueMut, TryIntoUnaligned},
 };
 
 pub struct OffsetSparseTable<'a, T> {
-    n: usize,
-    k_max: usize,
     data: &'a [T],
-    offsets: Vec<BitFieldVec>,
+    offsets: Vec<BitFieldVecU<Box<[usize]>>>,
 }
 
 impl<'a, T> MemoryUsage for OffsetSparseTable<'a, T> {
     fn memory_allocated(&self) -> usize {
-        self.offsets.len() * std::mem::size_of::<BitFieldVec>()
+        self.offsets.len() * std::mem::size_of::<BitFieldVecU<Box<[usize]>>>()
             + self
                 .offsets
                 .iter()
@@ -32,28 +29,23 @@ impl<'a, T: Ord> RMQ<'a, T> for OffsetSparseTable<'a, T> {
     fn new(data: &'a [T]) -> Self {
         let n = data.len();
         let k_max = n.ilog2() as usize;
-        let mut table = Self {
-            n,
-            k_max,
-            data,
-            offsets: (1..=k_max).map(|k| BitFieldVec::new(k, n)).collect(),
-        };
-        for i in 0..table.n - 1 {
-            table.offsets[0].set_value(i, table.data.argmin(i, i + 1) - i);
+        let mut offsets: Vec<BitFieldVec<Box<[usize]>>> = (1..=k_max).map(|k| BitFieldVec::new_padded(k, n)).collect();
+        for i in 0..n - 1 {
+            offsets[0].set_value(i, data.argmin(i, i + 1) - i);
         }
-        for k in 2..=table.k_max {
-            for i in 0..table.n + 1 - (1 << k) {
+        for k in 2..=k_max {
+            for i in 0..n + 1 - (1 << k) {
                 let (loffset, roffset) = unsafe {
                     (
-                        table.offsets[k - 2].get_value_unchecked(i),
-                        table.offsets[k - 2].get_value_unchecked(i + (1 << (k - 1)))
+                        offsets[k - 2].get_value_unchecked(i),
+                        offsets[k - 2].get_value_unchecked(i + (1 << (k - 1)))
                             + (1 << (k - 1)),
                     )
                 };
-                table.offsets[k - 1].set_value(i, table.data.argmin(i + loffset, i + roffset) - i);
+                offsets[k - 1].set_value(i, data.argmin(i + loffset, i + roffset) - i);
             }
         }
-        table
+        OffsetSparseTable { data, offsets: offsets.into_iter().map(|x| {x.try_into_unaligned().unwrap()}).collect() }
     }
 
     // Queries [l, r]
@@ -78,129 +70,64 @@ crate::rmq_family! {
     pub OffsetSparseTableFamily => OffsetSparseTable
 }
 
-pub struct IndexSparseTable<'a, T> {
+pub struct IndexST<'a, T, C = Vec<usize>> {
     n: usize,
     k_max: usize,
     data: &'a [T],
-    indices: Vec<usize>,
+    indices: C,
 }
 
-impl<'a, T: Ord> IndexSparseTable<'a, T> {
+impl<'a, T: Ord, C: BuildableSlice<Value = usize>> IndexST<'a, T, C> {
     pub fn new(data: &'a [T], indices: &[usize]) -> Self {
         let n = indices.len();
         let k_max = n.ilog2() as usize;
-        let mut table = Self {
-            n,
-            k_max,
-            data,
-            indices: vec![0; (k_max + 1) * n],
-        };
+        let bit_width = (usize::BITS - (data.len() - 1).leading_zeros()).max(1) as usize;
+        let mut table = C::new_builder((k_max + 1) * n, bit_width);
 
         for i in 0..n {
-            table.indices[i] = indices[i];
+            table.set_value(i, indices[i]);
         }
-        for k in 1..=table.k_max {
-            for i in 0..table.n + 1 - (1 << k) {
-                let lindex = table.indices[(k - 1) * table.n + i];
-                let rindex = table.indices[(k - 1) * table.n + i + (1 << (k - 1))];
-                table.indices[k * n + i] = data.argmin(lindex, rindex);
-            }
-        }
-        table
-    }
-}
-
-impl<'a, T> MemoryUsage for IndexSparseTable<'a, T> {
-    fn memory_allocated(&self) -> usize {
-        self.indices.len() * std::mem::size_of::<usize>()
-    }
-}
-
-impl<'a, T: Ord> RMQ<'a, T> for IndexSparseTable<'a, T> {
-    fn new(data: &'a [T]) -> Self
-    where
-        Self: Sized,
-    {
-        let indices: Vec<usize> = (0..data.len()).collect();
-        IndexSparseTable::new(data, &indices)
-    }
-
-    // Queries [l, r]
-    fn rmq(&self, l: usize, r: usize) -> usize {
-        let k = (r - l + 1).ilog2() as usize;
-        let left_index = self.indices[k * self.n + l];
-        let right_index = self.indices[k * self.n + r + 1 - (1 << k)];
-
-        self.data.argmin(left_index, right_index)
-    }
-}
-
-crate::rmq_family! {
-    pub IndexSparseTableFamily => IndexSparseTable
-}
-
-pub struct PackedIndexSparseTable<'a, T> {
-    n: usize,
-    k_max: usize,
-    data: &'a [T],
-    indices: BitFieldVec,
-}
-
-impl<'a, T: Ord> PackedIndexSparseTable<'a, T> {
-    pub fn new(data: &'a [T], indices: &[usize]) -> Self {
-        let n = indices.len();
-        let k_max = n.ilog2() as usize;
-        // Every stored index is one of `indices`, so the largest one bounds the width.
-        let max_index = indices.iter().copied().max().unwrap_or(0);
-        let width = (usize::BITS - max_index.leading_zeros()).max(1) as usize;
-        let mut table = Self {
-            n,
-            k_max,
-            data,
-            indices: BitFieldVec::new(width, (k_max + 1) * n),
-        };
-
-        for i in 0..n {
-            table.indices.set_value(i, indices[i]);
-        }
-        for k in 1..=table.k_max {
-            for i in 0..table.n + 1 - (1 << k) {
+        for k in 1..=k_max {
+            for i in 0..n + 1 - (1 << k) {
                 let (lindex, rindex) = unsafe {
                     (
-                        table.indices.get_value_unchecked((k - 1) * table.n + i),
-                        table
-                            .indices
-                            .get_value_unchecked((k - 1) * table.n + i + (1 << (k - 1))),
+                        table.get_value_unchecked((k - 1) * n + i),
+                        table.get_value_unchecked((k - 1) * n + i + (1 << (k - 1))),
                     )
                 };
-                table
-                    .indices
-                    .set_value(k * n + i, data.argmin(lindex, rindex));
+                unsafe {
+                    table.set_value_unchecked(k * n + i, data.argmin(lindex, rindex));
+                }
             }
         }
-        table
+        Self {
+            n,
+            k_max,
+            data,
+            indices: C::build(table),
+        }
     }
 }
 
-impl<'a, T> MemoryUsage for PackedIndexSparseTable<'a, T> {
+impl<'a, T, C: MemoryUsage> MemoryUsage for IndexST<'a, T, C> {
     fn memory_allocated(&self) -> usize {
         self.indices.memory_allocated()
     }
 }
 
-impl<'a, T: Ord> RMQ<'a, T> for PackedIndexSparseTable<'a, T> {
+impl<'a, T: Ord, C: BuildableSlice<Value = usize>> RMQ<'a, T> for IndexST<'a, T, C> {
     fn new(data: &'a [T]) -> Self
     where
         Self: Sized,
     {
         let indices: Vec<usize> = (0..data.len()).collect();
-        PackedIndexSparseTable::new(data, &indices)
+        IndexST::new(data, &indices)
     }
 
     // Queries [l, r]
     fn rmq(&self, l: usize, r: usize) -> usize {
         let k = (r - l + 1).ilog2() as usize;
-        let (left_index, right_index) = unsafe {
+        let (lindex, rindex) = unsafe {
             (
                 self.indices.get_value_unchecked(k * self.n + l),
                 self.indices
@@ -208,18 +135,24 @@ impl<'a, T: Ord> RMQ<'a, T> for PackedIndexSparseTable<'a, T> {
             )
         };
 
-        self.data.argmin(left_index, right_index)
+        self.data.argmin(lindex, rindex)
     }
 }
 
 crate::rmq_family! {
-    pub PackedIndexSparseTableFamily => PackedIndexSparseTable
+    pub IndexSparseTableFamily => IndexST
+}
+
+type PackedIndexST<'a, T> = IndexST<'a, T, BitFieldVecU<Box<[usize]>>>;
+
+crate::rmq_family! {
+    pub PackedIndexSparseTableFamily => PackedIndexST
 }
 
 pub struct PositionOffsetSparseTable<'a, T> {
     data: &'a [T],
-    positions: BitFieldVec,
-    offsets: Vec<BitFieldVec>,
+    positions: BitFieldVecU<Box<[usize]>>,
+    offsets: Vec<BitFieldVecU<Box<[usize]>>>,
 }
 
 impl<'a, T: Ord> PositionOffsetSparseTable<'a, T> {
@@ -229,11 +162,11 @@ impl<'a, T: Ord> PositionOffsetSparseTable<'a, T> {
 
         let max_position = positions.iter().copied().max().unwrap_or(0);
         let width = (usize::BITS - max_position.leading_zeros()).max(1) as usize;
-        let mut packed_positions = BitFieldVec::new(width, n);
+        let mut packed_positions = BitFieldVec::new_padded(width, n);
         for i in 0..n {
             packed_positions.set_value(i, positions[i]);
         }
-        let mut offsets: Vec<BitFieldVec> = (1..=k_max).map(|k| BitFieldVec::new(k, n)).collect();
+        let mut offsets: Vec<BitFieldVec<Box<[usize]>>> = (1..=k_max).map(|k| BitFieldVec::new_padded(k, n)).collect();
 
         for k in 1..=k_max {
             let half = 1 << (k - 1);
@@ -263,8 +196,8 @@ impl<'a, T: Ord> PositionOffsetSparseTable<'a, T> {
         }
         Self {
             data,
-            positions: packed_positions,
-            offsets,
+            positions: packed_positions.try_into_unaligned().unwrap(),
+            offsets: offsets.into_iter().map(|x| { x.try_into_unaligned().unwrap() }).collect(),
         }
     }
 
@@ -277,7 +210,7 @@ impl<'a, T: Ord> PositionOffsetSparseTable<'a, T> {
 impl<'a, T> MemoryUsage for PositionOffsetSparseTable<'a, T> {
     fn memory_allocated(&self) -> usize {
         self.positions.memory_allocated()
-            + self.offsets.len() * std::mem::size_of::<BitFieldVec>()
+            + self.offsets.len() * std::mem::size_of::<BitFieldVecU<Box<[usize]>>>()
             + self
                 .offsets
                 .iter()
@@ -317,6 +250,124 @@ impl<'a, T: Ord> RMQ<'a, T> for PositionOffsetSparseTable<'a, T> {
 
 crate::rmq_family! {
     pub PositionOffsetSparseTableFamily => PositionOffsetSparseTable
+}
+
+pub trait Getter<T> {
+    fn get(&self, i: usize) -> T;
+}
+impl<T, F: Fn(usize) -> T> Getter<T> for F {
+    #[inline]
+    fn get(&self, i: usize) -> T {
+        self(i)
+    }
+}
+
+pub struct SliceGetter<'a, T>(&'a [T]);
+impl<'a, T: Copy> Getter<T> for SliceGetter<'a, T> {
+    #[inline]
+    fn get(&self, i: usize) -> T {
+        self.0[i]
+    }
+}
+
+pub struct CustomOffsetST<'a, T, U> {
+    pub getter: U,
+    offsets: Vec<BitFieldVec>,
+    _marker: PhantomData<&'a T>,
+}
+
+impl<'a, T: Ord, U: Getter<T>> CustomOffsetST<'a, T, U> {
+    pub fn new(n: usize, getter: U) -> Self {
+        let k_max = if n == 0 { 0 } else { n.ilog2() as usize };
+
+        let mut offsets: Vec<BitFieldVec> = (1..=k_max).map(|k| BitFieldVec::new(k, n)).collect();
+
+        for k in 1..=k_max {
+            let half = 1 << (k - 1);
+            for i in 0..n + 1 - (1 << k) {
+                let loffset = if k == 1 {
+                    0
+                } else {
+                    unsafe { offsets[k - 2].get_value_unchecked(i) }
+                };
+                let roffset = half
+                    + if k == 1 {
+                        0
+                    } else {
+                        unsafe { offsets[k - 2].get_value_unchecked(i + half) }
+                    };
+                let lpos = i + loffset;
+                let rpos = i + roffset;
+                offsets[k - 1].set_value(
+                    i,
+                    if getter.get(lpos) <= getter.get(rpos) {
+                        loffset
+                    } else {
+                        roffset
+                    },
+                );
+            }
+        }
+        Self {
+            getter,
+            offsets,
+            _marker: PhantomData,
+        }
+    }
+
+    // Queries slots [l, r], returning a data position.
+    pub fn rmq(&self, l: usize, r: usize) -> usize {
+        if l == r {
+            return l;
+        }
+        let k = (r - l + 1).ilog2() as usize;
+        let s = r + 1 - (1 << k);
+        let (left_offset, right_offset) = unsafe {
+            (
+                self.offsets[k - 1].get_value_unchecked(l),
+                self.offsets[k - 1].get_value_unchecked(s),
+            )
+        };
+        let left_index = l + left_offset;
+        let right_index = s + right_offset;
+
+        if self.getter.get(left_index) <= self.getter.get(right_index) {
+            left_index
+        } else {
+            right_index
+        }
+    }
+}
+
+impl<'a, T, U> MemoryUsage for CustomOffsetST<'a, T, U> {
+    /// Offset tables only; whatever the getter owns is counted by the caller.
+    fn memory_allocated(&self) -> usize {
+        self.offsets.len() * std::mem::size_of::<BitFieldVec>()
+            + self
+                .offsets
+                .iter()
+                .map(|o| o.memory_allocated())
+                .sum::<usize>()
+    }
+}
+
+pub type SliceOffsetST<'a, T> = CustomOffsetST<'a, T, SliceGetter<'a, T>>;
+
+impl<'a, T: Ord + Copy> RMQ<'a, T> for SliceOffsetST<'a, T> {
+    fn new(data: &'a [T]) -> Self
+    where
+        Self: Sized,
+    {
+        CustomOffsetST::new(data.len(), SliceGetter(data))
+    }
+
+    fn rmq(&self, l: usize, r: usize) -> usize {
+        CustomOffsetST::rmq(self, l, r)
+    }
+}
+
+crate::rmq_family! {
+    pub CustomOffsetSparseTableFamily => SliceOffsetST where T: Ord + Copy
 }
 
 pub struct ValueSparseTable<'a, T> {

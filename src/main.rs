@@ -366,6 +366,7 @@ fn run_all(
 ) -> std::io::Result<()> {
     // Baselines
     run_family::<u32, IndexSparseTableFamily>(out, dist, min_n, max_n)?;
+    run_family::<u32, PackedIndexSparseTableFamily>(out, dist, min_n, max_n)?;
     run_family::<u32, OffsetSparseTableFamily>(out, dist, min_n, max_n)?;
     run_family::<u32, RMQTreeFamily>(out, dist, min_n, max_n)?;
 
