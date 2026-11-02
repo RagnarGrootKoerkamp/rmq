@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
+use needletail::{Sequence, parse_fastx_file};
 use rmq::base::{MemoryUsage, RMQ, RMQFamily};
 use rmq::sparse_table::OffsetSparseTable;
 use rmq::*;
@@ -427,6 +428,7 @@ enum Command {
     Main(MainArgs),
     /// Benchmark every family at n = 1e7 over range sizes 2^1 up to 2^24
     Ranges { run: String },
+    Genome,
 }
 
 #[derive(clap::Args)]
@@ -444,6 +446,7 @@ fn main() -> std::io::Result<()> {
     match Cli::parse().command {
         Command::Main(args) => run_main(args),
         Command::Ranges { run } => run_ranges(&run),
+        Command::Genome => read_file(),
     }
 }
 
@@ -548,4 +551,49 @@ fn run_ranges_once<Family: RMQFamily<u32>>(out: &mut BufWriter<File>) -> std::io
     }
 
     Ok(())
+}
+
+fn read_file() -> std::io::Result<()> {
+    let filename = "ncbi_dataset/genome.fna";
+    let mut reader = parse_fastx_file(&filename).unwrap();
+    
+    let mut v: Vec<u8> = Vec::new();
+    while let Some(record) = reader.next() {
+        let mut seq = record.unwrap().seq().to_vec();
+        for b in seq.iter_mut() {
+            v.push(b'A' + ((*b >> 1) & 3));
+        }
+    }
+
+    sa_and_lcp(&v);
+
+    Ok(())
+}
+
+pub fn sa_and_lcp(t: &[u8]) {
+    eprintln!("building sa..");
+    let sa_builder = libsais::SuffixArrayConstruction::for_text(t)
+        .in_owned_buffer64()
+        .multi_threaded(libsais::ThreadCount::openmp_default())
+        .run()
+        .unwrap();
+    eprintln!("SA:   {:.3} GB", std::mem::size_of_val(sa_builder.suffix_array()) as f32 / 1e9);
+
+    eprintln!("building plcp..");
+    let plcp_builder = sa_builder.plcp_construction()
+    .multi_threaded(libsais::ThreadCount::openmp_default())
+    .run()
+    .unwrap();
+    eprintln!("PLCP: {:.3} GB", std::mem::size_of_val(plcp_builder.plcp()) as f32 / 1e9);
+
+    let res_with_plcp_and_lcp = plcp_builder.lcp_construction()
+        .multi_threaded(libsais::ThreadCount::openmp_default())
+        .run()
+        .unwrap();
+
+    let (_, lcp, _, r) = res_with_plcp_and_lcp.into_parts();
+    
+    let maxv = lcp.iter().max().unwrap();
+
+    println!("{}", maxv);
 }
