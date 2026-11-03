@@ -69,6 +69,25 @@ or
 nohup scripts/run_and_publish.sh sweep main > bench.log 2>&1 &
 ```
 
+### On a Slurm cluster
+
+`scripts/run_and_publish.sbatch` wraps the same script as a batch job that takes a whole node
+and pins the benchmark to one core. Compute nodes often have no internet access, so do the
+network-dependent steps on the login node and submit from the repo root:
+
+```sh
+scripts/fetch_deps.sh && cargo build --release   # the job runs cargo offline
+scripts/fetch_genome.sh                          # only for `genome`
+sbatch scripts/run_and_publish.sbatch sweep main
+sbatch -p <partition> -t 2-00:00:00 scripts/run_and_publish.sbatch big main --min-n 1e8 --max-n 1e8
+squeue --me; tail -f slurm-rmq-bench-<jobid>.out
+```
+
+Set the partition, account and node constraint on the `sbatch` command line, or uncomment the
+`##SBATCH` lines in the script. `<host>` in the run name is the compute node's name. If compute
+nodes can't reach GitHub, the push fails and the run stays committed in `runs/`; push it from
+the login node as described below.
+
 The run is named `<date>_<time>_<label>_<host>`. If the benchmark fails nothing is committed.
 If pushing fails five times the run stays committed in `runs/`; push it later with
 `git -C runs pull --rebase && git -C runs push`.
