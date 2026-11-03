@@ -39,6 +39,7 @@ if ! command -v cargo > /dev/null && [[ -f $HOME/.cargo/env ]]; then
 fi
 export CARGO_NET_OFFLINE=true
 export OMP_NUM_THREADS="${SLURM_CPUS_ON_NODE:-$(nproc)}"
+export IGNORE_MEM_THRESHOLD=1
 
 echo "job $SLURM_JOB_ID on $(hostname -s), $(date -Is)"
 echo "code $(git rev-parse --short HEAD)$(git diff --quiet || echo '-dirty'), args: $*"
