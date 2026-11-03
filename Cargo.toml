@@ -25,3 +25,9 @@ rmq = { path = ".", features = ["testing"] }
 [profile.release]
 lto = "fat"
 codegen-units = 1
+
+[profile.profiling]
+inherits = "release"
+debug = true              
+split-debuginfo = "packed"
+strip = false
