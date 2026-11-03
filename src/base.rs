@@ -9,6 +9,12 @@ pub trait RMQ<'a, T: Sized> {
         Self: Sized;
 
     fn rmq(&self, l: usize, r: usize) -> usize;
+    fn rmq_batch(&self, queries: &[(usize, usize)], answers: &mut [usize]) {
+        answers
+            .iter_mut()
+            .zip(queries)
+            .for_each(|(ans, &(l, r))| *ans = self.rmq(l, r));
+    }
 }
 
 pub trait RMQFamily<T> {

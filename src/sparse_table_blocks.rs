@@ -8,20 +8,18 @@ use crate::{
     sparse_table::{IndexST, OwningOffsetSparseTable},
 };
 
-pub struct StridedIndexSparseTable<'a, T, const B: usize, const S: usize> {
+pub struct StridedIndexSparseTable<'a, T, const B: usize> {
     data: &'a [T],
     sparse_table: OwningOffsetSparseTable<'a, T>,
 }
 
-impl<'a, T, const B: usize, const S: usize> MemoryUsage for StridedIndexSparseTable<'a, T, B, S> {
+impl<'a, T, const B: usize> MemoryUsage for StridedIndexSparseTable<'a, T, B> {
     fn memory_allocated(&self) -> usize {
         self.sparse_table.memory_allocated()
     }
 }
 
-impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
-    for StridedIndexSparseTable<'a, T, B, S>
-{
+impl<'a, T: Ord + Copy, const B: usize> RMQ<'a, T> for StridedIndexSparseTable<'a, T, B> {
     fn new(data: &'a [T]) -> Self
     where
         Self: Sized,
@@ -49,12 +47,6 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
         let rblock = r / B;
 
         if lblock == rblock {
-            if B > S && r - l > S {
-                let over_sample_result = self.sparse_table.rmq(lblock, lblock);
-                if over_sample_result >= l && over_sample_result <= r {
-                    return over_sample_result;
-                }
-            }
             return self.scan(l, r);
         }
 
@@ -77,7 +69,7 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
     }
 }
 
-impl<'a, T: Ord, const B: usize, const S: usize> StridedIndexSparseTable<'a, T, B, S> {
+impl<'a, T: Ord, const B: usize> StridedIndexSparseTable<'a, T, B> {
     fn scan(&self, l: usize, r: usize) -> usize {
         let mut min_index = l;
         for i in l + 1..r + 1 {
@@ -88,36 +80,31 @@ impl<'a, T: Ord, const B: usize, const S: usize> StridedIndexSparseTable<'a, T, 
 }
 
 crate::rmq_family! {
-    pub StridedIndexSparseTableFamily<const B: usize, const S: usize> => StridedIndexSparseTable where T: Ord + Copy
+    pub StridedIndexSparseTableFamily<const B: usize> => StridedIndexSparseTable where T: Ord + Copy
 }
 
-pub struct StridedIndexAffixMasksSparseTable<'a, T, const B: usize, const S: usize> {
+pub struct StridedIndexAffixMasksSparseTable<'a, T, const B: usize> {
     data: &'a [T],
     sparse_table: OwningOffsetSparseTable<'a, T>,
-    // One B-bit mask per block: prefix minima | suffix minima
-    block_affix_masks: BitFieldVec,
+    // Bit i set iff data[i] is a prefix or suffix minimum of its block
+    affix_bits: Box<[u64]>,
 }
 
-impl<'a, T, const B: usize, const S: usize> MemoryUsage
-    for StridedIndexAffixMasksSparseTable<'a, T, B, S>
-{
+impl<'a, T, const B: usize> MemoryUsage for StridedIndexAffixMasksSparseTable<'a, T, B> {
     fn memory_allocated(&self) -> usize {
-        self.sparse_table.memory_allocated() + self.block_affix_masks.memory_allocated()
+        self.sparse_table.memory_allocated() + self.affix_bits.len() * size_of::<u64>()
     }
 }
 
-impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
-    for StridedIndexAffixMasksSparseTable<'a, T, B, S>
-{
+impl<'a, T: Ord + Copy, const B: usize> RMQ<'a, T> for StridedIndexAffixMasksSparseTable<'a, T, B> {
     fn new(data: &'a [T]) -> Self
     where
         Self: Sized,
     {
-        const { assert!(B <= 64, "affix masks are u64, so B must be <= 64") };
-
         let n = data.len();
         let mut indices: Vec<usize> = vec![];
-        let mut block_affix_masks = BitFieldVec::new(B, n.div_ceil(B));
+        let mut affix_bits = vec![0u64; n.div_ceil(64)].into_boxed_slice();
+        let mut set = |i: usize| affix_bits[i / 64] |= 1 << (i % 64);
 
         for i in (0..n).step_by(B) {
             let end = (i + B).min(n);
@@ -129,32 +116,31 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
             indices.push(idx);
 
             // Decreasing sequence from start to smallest
-            let mut prefix_seq: u64 = 1;
-            for j in i + 1..end {
-                let last = prefix_seq.ilog2();
-                if data[j] < data[i + last as usize] {
-                    prefix_seq |= 1 << (j - i);
+            let mut last = i;
+            set(i);
+            for j in i + 1..=idx {
+                if data[j] < data[last] {
+                    last = j;
+                    set(j);
                 }
             }
 
             // Decreasing sequence from end to smallest
-            let mut suffix_seq: u64 = 1 << (end - 1 - i);
-            for j in (i..end - 1).rev() {
-                let last = suffix_seq.trailing_zeros();
-                if data[j] <= data[i + last as usize] {
-                    suffix_seq |= 1 << (j - i);
+            let mut last = end - 1;
+            set(end - 1);
+            for j in (idx..end - 1).rev() {
+                if data[j] <= data[last] {
+                    last = j;
+                    set(j);
                 }
             }
-
-            // min_idx can be used to separate them
-            let affix_seq = prefix_seq | suffix_seq;
-            block_affix_masks.set_value(i / B, affix_seq as usize);
         }
 
+        // The block min (idx) separates the two sequences at query time
         Self {
             data,
             sparse_table: OwningOffsetSparseTable::new(data, &indices),
-            block_affix_masks,
+            affix_bits,
         }
     }
 
@@ -164,12 +150,6 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
         let rblock = r / B;
 
         if lblock == rblock {
-            if B > S && r - l > S {
-                let over_sample_result = self.sparse_table.rmq(lblock, lblock);
-                if over_sample_result >= l && over_sample_result <= r {
-                    return over_sample_result;
-                }
-            }
             return self.scan(l, r);
         }
 
@@ -192,36 +172,42 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
     }
 }
 
-impl<'a, T: Ord + Copy, const B: usize, const S: usize>
-    StridedIndexAffixMasksSparseTable<'a, T, B, S>
-{
+impl<'a, T: Ord + Copy, const B: usize> StridedIndexAffixMasksSparseTable<'a, T, B> {
     #[inline]
-    fn block_affix_mask(&self, block: usize) -> usize {
-        unsafe { self.block_affix_masks.get_value_unchecked(block) }
+    fn affix_word(&self, w: usize) -> u64 {
+        unsafe { *self.affix_bits.get_unchecked(w) }
     }
 
     // Leftmost minimum of [start of r's block, r]
     #[inline]
     fn prefix_min(&self, r: usize) -> usize {
         let block = r / B;
-        let start = block * B;
-        let min_offset = self.sparse_table.rmq(block, block) - start;
-        // Bits up to min_offset are prefix minima; past it the answer is the block min
-        let k = (r - start).min(min_offset);
-        let mask = self.block_affix_mask(block) & (usize::MAX >> (usize::BITS as usize - 1 - k));
-        start + mask.ilog2() as usize
+        // Bits up to the block min are prefix minima; past it the answer is the block min
+        let p = r.min(self.sparse_table.rmq(block, block));
+        // The block start bit is always set, so the scan stops inside the block
+        let mut w = p / 64;
+        let mut word = self.affix_word(w) & (u64::MAX >> (63 - p % 64));
+        while word == 0 {
+            w -= 1;
+            word = self.affix_word(w);
+        }
+        w * 64 + word.ilog2() as usize
     }
 
     // Leftmost minimum of [l, end of l's block]
     #[inline]
     fn suffix_min(&self, l: usize) -> usize {
         let block = l / B;
-        let start = block * B;
-        let min_offset = self.sparse_table.rmq(block, block) - start;
-        // Bits from min_offset on are suffix minima; before it the answer is the block min
-        let k = (l - start).max(min_offset);
-        let mask = self.block_affix_mask(block) & (usize::MAX << k);
-        start + mask.trailing_zeros() as usize
+        // Bits from the block min on are suffix minima; before it the answer is the block min
+        let p = l.max(self.sparse_table.rmq(block, block));
+        // The block end bit is always set, so the scan stops inside the block
+        let mut w = p / 64;
+        let mut word = self.affix_word(w) & (u64::MAX << (p % 64));
+        while word == 0 {
+            w += 1;
+            word = self.affix_word(w);
+        }
+        w * 64 + word.trailing_zeros() as usize
     }
 
     fn scan(&self, l: usize, r: usize) -> usize {
@@ -234,27 +220,23 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize>
 }
 
 crate::rmq_family! {
-    pub StridedIndexAffixMasksSparseTableFamily<const B: usize, const S: usize> => StridedIndexAffixMasksSparseTable where T: Ord + Copy
+    pub StridedIndexAffixMasksSparseTableFamily<const B: usize> => StridedIndexAffixMasksSparseTable where T: Ord + Copy
 }
 
-pub struct StridedIndexMinHeapSparseTable<'a, T, const B: usize, const S: usize> {
+pub struct StridedIndexMinHeapSparseTable<'a, T, const B: usize> {
     data: &'a [T],
     sparse_table: OwningOffsetSparseTable<'a, T>,
     // One 2B-bit cartesian tree identifier per block
     block_ids: BitFieldVec,
 }
 
-impl<'a, T, const B: usize, const S: usize> MemoryUsage
-    for StridedIndexMinHeapSparseTable<'a, T, B, S>
-{
+impl<'a, T, const B: usize> MemoryUsage for StridedIndexMinHeapSparseTable<'a, T, B> {
     fn memory_allocated(&self) -> usize {
         self.sparse_table.memory_allocated() + self.block_ids.memory_allocated()
     }
 }
 
-impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
-    for StridedIndexMinHeapSparseTable<'a, T, B, S>
-{
+impl<'a, T: Ord + Copy, const B: usize> RMQ<'a, T> for StridedIndexMinHeapSparseTable<'a, T, B> {
     fn new(data: &'a [T]) -> Self
     where
         Self: Sized,
@@ -285,12 +267,6 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
         let rblock = r / B;
 
         if lblock == rblock {
-            if B > S && r - l > S {
-                let over_sample_result = self.sparse_table.rmq(lblock, lblock);
-                if over_sample_result >= l && over_sample_result <= r {
-                    return over_sample_result;
-                }
-            }
             return self.in_block(lblock, l - lblock * B, r - lblock * B);
         }
 
@@ -313,7 +289,7 @@ impl<'a, T: Ord + Copy, const B: usize, const S: usize> RMQ<'a, T>
     }
 }
 
-impl<'a, T, const B: usize, const S: usize> StridedIndexMinHeapSparseTable<'a, T, B, S> {
+impl<'a, T, const B: usize> StridedIndexMinHeapSparseTable<'a, T, B> {
     // Leftmost minimum of block[l..=r], with l and r relative to the block start
     #[inline]
     fn in_block(&self, block: usize, l: usize, r: usize) -> usize {
@@ -323,7 +299,7 @@ impl<'a, T, const B: usize, const S: usize> StridedIndexMinHeapSparseTable<'a, T
 }
 
 crate::rmq_family! {
-    pub StridedIndexMinHeapSparseTableFamily<const B: usize, const S: usize> => StridedIndexMinHeapSparseTable where T: Ord + Copy
+    pub StridedIndexMinHeapSparseTableFamily<const B: usize> => StridedIndexMinHeapSparseTable where T: Ord + Copy
 }
 
 pub struct BitBlocksSparseTable<'a, T, const B: usize> {

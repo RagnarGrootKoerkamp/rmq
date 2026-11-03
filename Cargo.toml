@@ -31,3 +31,5 @@ inherits = "release"
 debug = true              
 split-debuginfo = "packed"
 strip = false
+[build-dependencies]
+cc = "1.4"

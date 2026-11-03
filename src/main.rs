@@ -7,8 +7,9 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
-use needletail::{Sequence, parse_fastx_file};
+use needletail::{parse_fastx_file};
 use rmq::base::{MemoryUsage, RMQ, RMQFamily};
+use rmq::bbst::BbSTValue;
 use rmq::sparse_table::OffsetSparseTable;
 use rmq::*;
 
@@ -400,18 +401,20 @@ fn run_all(
     min_n: usize,
     max_n: usize,
 ) -> std::io::Result<()> {
-    // Baselines
-    run_family::<u32, IndexSparseTableFamily>(out, dist, min_n, max_n)?;
-    run_family::<u32, PackedIndexSparseTableFamily>(out, dist, min_n, max_n)?;
     run_family::<u32, OffsetSparseTableFamily>(out, dist, min_n, max_n)?;
-    run_family::<u32, RMQTreeFamily>(out, dist, min_n, max_n)?;
-
+    run_family::<u32, OffsetSparseTable4Family>(out, dist, min_n, max_n)?;
+    // Baselines
+    //run_family::<u32, IndexSparseTableFamily>(out, dist, min_n, max_n)?;
+    //run_family::<u32, PackedIndexSparseTableFamily>(out, dist, min_n, max_n)?;
+    //run_family::<u32, OffsetSparseTableFamily>(out, dist, min_n, max_n)?;
+    // run_family::<u32, RMQTreeFamily>(out, dist, min_n, max_n)?;
+/* 
     // Block structures, compared at equal block sizes
     for_each!(B in [8, 16, 32, 64] {
-        run_family::<u32, StridedIndexSparseTableFamily<B, B>>(out, dist, min_n, max_n)?;
+        run_family::<u32, StridedIndexSparseTableFamily<B>>(out, dist, min_n, max_n)?;
     });
     for_each!(B in [8, 16, 32, 64] {
-        run_family::<u32, StridedIndexAffixMasksSparseTableFamily<B, B>>(out, dist, min_n, max_n)?;
+        run_family::<u32, StridedIndexAffixMasksSparseTableFamily<B>>(out, dist, min_n, max_n)?;
     });
     for_each!(B in [8, 16, 32, 64] {
         run_family::<u32, BitBlocksSparseTableFamily<B>>(out, dist, min_n, max_n)?;
@@ -419,7 +422,7 @@ fn run_all(
 
     // Block size chosen internally from n
     run_family::<u32, SparseTableCartesianBlocksFamily>(out, dist, min_n, max_n)?;
-    run_family::<u32, SparseTable3Family>(out, dist, min_n, max_n)?;
+    run_family::<u32, SparseTable3Family>(out, dist, min_n, max_n)?;*/
 
     Ok(())
 }
@@ -430,26 +433,30 @@ fn run_all_genome<T>(
     genome_lcp: &[T],
 ) -> std::io::Result<()>
 where
-    T: RMQValue,
+    T: RMQValue + BbSTValue,
 {
     // Baselines
-    run_family_on_genome::<T, OffsetSparseTableFamily>(out, dist, genome_lcp)?;
-    run_family_on_genome::<T, RMQTreeFamily>(out, dist, genome_lcp)?;
+    //run_family_on_genome::<T, OffsetSparseTableFamily>(out, dist, genome_lcp)?;
+    //run_family_on_genome::<T, RMQTreeFamily>(out, dist, genome_lcp)?;
 
     // Block structures, compared at equal block sizes
-    for_each!(B in [8, 16, 32, 64, 128, 256, 512, 1024] {
-        run_family_on_genome::<T, StridedIndexSparseTableFamily<B, B>>(out, dist, genome_lcp)?;
+    for_each!(B in [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096] {
+        run_family_on_genome::<T, StridedIndexSparseTableFamily<B>>(out, dist, genome_lcp)?;
     });
-    for_each!(B in [8, 16, 32, 64] {
-        run_family_on_genome::<T, StridedIndexAffixMasksSparseTableFamily<B, B>>(out, dist, genome_lcp)?;
+    for_each!(B in [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096] {
+        run_family_on_genome::<T, StridedIndexAffixMasksSparseTableFamily<B>>(out, dist, genome_lcp)?;
     });
-    for_each!(B in [8, 16, 32, 64] {
-        run_family_on_genome::<T, BitBlocksSparseTableFamily<B>>(out, dist, genome_lcp)?;
-    });
+    // for_each!(B in [8, 16, 32, 64] {
+    //     run_family_on_genome::<T, BitBlocksSparseTableFamily<B>>(out, dist, genome_lcp)?;
+    // });
 
     // Block size chosen internally from n
-    run_family_on_genome::<T, SparseTableCartesianBlocksFamily>(out, dist, genome_lcp)?;
-    run_family_on_genome::<T, SparseTable3Family>(out, dist, genome_lcp)?;
+    //run_family_on_genome::<T, SparseTableCartesianBlocksFamily>(out, dist, genome_lcp)?;
+    //run_family_on_genome::<T, SparseTable3Family>(out, dist, genome_lcp)?;
+
+    run_family_on_genome::<T, BbSTFamily<9>>(out, dist, genome_lcp)?;
+    run_family_on_genome::<T, BbST2Family<9, 6>>(out, dist, genome_lcp)?;
+    run_family_on_genome::<T, BbST2Family<12, 8>>(out, dist, genome_lcp)?;
 
     Ok(())
 }
@@ -577,14 +584,14 @@ fn run_ranges(run: &str) -> std::io::Result<()> {
     run_ranges_once::<RMQTreeFamily>(&mut out)?;
 
     // Block structures, compared at equal block sizes
-    run_ranges_once::<StridedIndexSparseTableFamily<8, 8>>(&mut out)?;
-    run_ranges_once::<StridedIndexSparseTableFamily<16, 16>>(&mut out)?;
-    run_ranges_once::<StridedIndexSparseTableFamily<32, 32>>(&mut out)?;
-    run_ranges_once::<StridedIndexSparseTableFamily<64, 64>>(&mut out)?;
-    run_ranges_once::<StridedIndexAffixMasksSparseTableFamily<8, 8>>(&mut out)?;
-    run_ranges_once::<StridedIndexAffixMasksSparseTableFamily<16, 16>>(&mut out)?;
-    run_ranges_once::<StridedIndexAffixMasksSparseTableFamily<32, 32>>(&mut out)?;
-    run_ranges_once::<StridedIndexAffixMasksSparseTableFamily<64, 64>>(&mut out)?;
+    run_ranges_once::<StridedIndexSparseTableFamily<8>>(&mut out)?;
+    run_ranges_once::<StridedIndexSparseTableFamily<16>>(&mut out)?;
+    run_ranges_once::<StridedIndexSparseTableFamily<32>>(&mut out)?;
+    run_ranges_once::<StridedIndexSparseTableFamily<64>>(&mut out)?;
+    run_ranges_once::<StridedIndexAffixMasksSparseTableFamily<8>>(&mut out)?;
+    run_ranges_once::<StridedIndexAffixMasksSparseTableFamily<16>>(&mut out)?;
+    run_ranges_once::<StridedIndexAffixMasksSparseTableFamily<32>>(&mut out)?;
+    run_ranges_once::<StridedIndexAffixMasksSparseTableFamily<64>>(&mut out)?;
     run_ranges_once::<BitBlocksSparseTableFamily<8>>(&mut out)?;
     run_ranges_once::<BitBlocksSparseTableFamily<16>>(&mut out)?;
     run_ranges_once::<BitBlocksSparseTableFamily<32>>(&mut out)?;

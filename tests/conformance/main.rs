@@ -1,5 +1,7 @@
 // One test binary for the shared conformance suite; each module covers the
 // families defined in the src file of the same name.
+mod bbst;
+mod flrmq;
 mod rmq_tree;
 mod sparse_table;
 mod sparse_table2;

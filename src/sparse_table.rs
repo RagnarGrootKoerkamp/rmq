@@ -598,3 +598,112 @@ pub type OwningOffsetSparseTable<'a, T> = OwningRMQWrapper<'a, T, OffsetSparseTa
 crate::rmq_family! {
     pub OwningOffsetSparseTableFamily => OwningOffsetSparseTable where T: Ord + Copy
 }
+
+pub struct OffsetSparseTable4<'a, T> {
+    data: &'a [T],
+    offsets: Vec<BitFieldVecU<Box<[usize]>>>,
+}
+
+// Each level k (window 2^k) is stored transposed with stride s = 2^k, i.e.
+// column-major by i mod s, so that entries i and i + s are adjacent.
+#[inline(always)]
+fn transposed_slot(i: usize, k: usize, n: usize) -> usize {
+    let rows = (n + (1 << k) - 1) >> k;
+    (i & ((1 << k) - 1)) * rows + (i >> k)
+}
+
+impl<'a, T> MemoryUsage for OffsetSparseTable4<'a, T> {
+    fn memory_allocated(&self) -> usize {
+        self.offsets.len() * std::mem::size_of::<BitFieldVecU<Box<[usize]>>>()
+            + self
+                .offsets
+                .iter()
+                .map(|o| o.memory_allocated())
+                .sum::<usize>()
+    }
+}
+
+impl<'a, T: Ord> RMQ<'a, T> for OffsetSparseTable4<'a, T> {
+    fn new(data: &'a [T]) -> Self {
+        let n = data.len();
+        let k_max = n.ilog2() as usize;
+        let mut offsets: Vec<BitFieldVec<Box<[usize]>>> = (1..=k_max)
+            .step_by(2)
+            .map(|k| BitFieldVec::new_padded(k, ((n + (1 << k) - 1) >> k) << k))
+            .collect();
+        for i in 0..n - 1 {
+            offsets[0].set_value(transposed_slot(i, 1, n), data.argmin(i, i + 1) - i);
+        }
+        for k in (3..=k_max).step_by(2) {
+            let s = 1 << (k - 2);
+            for i in 0..n + 1 - (1 << k) {
+                // i, i + s, i + 2s, i + 3s are adjacent in level k - 2
+                let p = transposed_slot(i, k - 2, n);
+                let (l1offset, l2offset, l3offset, l4offset) = unsafe {
+                    (
+                        offsets[(k - 3) / 2].get_value_unchecked(p),
+                        offsets[(k - 3) / 2].get_value_unchecked(p + 1) + s,
+                        offsets[(k - 3) / 2].get_value_unchecked(p + 2) + 2 * s,
+                        offsets[(k - 3) / 2].get_value_unchecked(p + 3) + 3 * s,
+                    )
+                };
+                let lindex = data.argmin(i + l1offset, i + l2offset);
+                let rindex = data.argmin(i + l3offset, i + l4offset);
+                offsets[(k - 1) / 2]
+                    .set_value(transposed_slot(i, k, n), data.argmin(lindex, rindex) - i);
+            }
+        }
+        OffsetSparseTable4 {
+            data,
+            offsets: offsets
+                .into_iter()
+                .map(|x| x.try_into_unaligned().unwrap())
+                .collect(),
+        }
+    }
+
+    // Queries [l, r]
+    fn rmq(&self, l: usize, r: usize) -> usize {
+        if l == r {
+            return l;
+        }
+
+        let n = self.data.len();
+        let k = (r - l + 1).ilog2() as usize;
+        if k % 2 == 1 {
+            // Two overlapping windows of size 2^k
+            let offsets = &self.offsets[(k - 1) / 2];
+            let j = r + 1 - (1 << k);
+            let (left_index, right_index) = unsafe {
+                (
+                    offsets.get_value_unchecked(transposed_slot(l, k, n)) + l,
+                    offsets.get_value_unchecked(transposed_slot(j, k, n)) + j,
+                )
+            };
+            self.data.argmin(left_index, right_index)
+        } else {
+            // Four overlapping windows of size s = 2^(k-1), since 2s <= r - l + 1 < 4s.
+            // l, l + s and j, j + s are adjacent pairs in the transposed level k - 1
+            let s = 1 << (k - 1);
+            let offsets = &self.offsets[(k - 2) / 2];
+            let j = r + 1 - 2 * s;
+            let p = transposed_slot(l, k - 1, n);
+            let q = transposed_slot(j, k - 1, n);
+            let (i1, i2, i3, i4) = unsafe {
+                (
+                    offsets.get_value_unchecked(p) + l,
+                    offsets.get_value_unchecked(p + 1) + l + s,
+                    offsets.get_value_unchecked(q) + j,
+                    offsets.get_value_unchecked(q + 1) + j + s,
+                )
+            };
+            let left_index = self.data.argmin(i1, i2);
+            let right_index = self.data.argmin(i3, i4);
+            self.data.argmin(left_index, right_index)
+        }
+    }
+}
+
+crate::rmq_family! {
+    pub OffsetSparseTable4Family => OffsetSparseTable4
+}

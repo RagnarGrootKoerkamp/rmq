@@ -4,3 +4,5 @@
 /runs
 __pycache__/
 /ncbi_dataset
+/BbST
+/FL-RMQ
