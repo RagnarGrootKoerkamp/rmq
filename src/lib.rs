@@ -15,9 +15,10 @@ pub mod testing;
 pub use bbst::{BbST2Family, BbSTFamily};
 pub use flrmq::FLRMQFamily;
 pub use naive::NaiveRMQFamily;
-pub use rmq_tree::{PackedRMQTreeFamily, RMQTreeFamily};
+pub use rmq_tree::{FanoutRMQTreeFamily, PackedRMQTreeFamily, RMQTreeFamily};
 pub use sparse_table::{
-    CustomOffsetSparseTableFamily, IndexSparseTableFamily, OffsetSparseTable4Family,
+    CustomOffsetSparseTableFamily, FastValueSparseTableFamily, FanoutValueSparseTableFamily,
+    IndexSparseTableFamily,
     OffsetSparseTableFamily, OwningOffsetSparseTableFamily, PackedIndexSparseTableFamily,
     PackedValueSparseTableFamily, PositionOffsetSparseTableFamily, ValueSparseTableFamily,
 };

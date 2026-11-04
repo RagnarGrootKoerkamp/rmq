@@ -10,5 +10,6 @@ rmq_conformance!(
 rmq_conformance!(custom_offset_sparse_table, CustomOffsetSparseTableFamily);
 rmq_conformance!(owning_offset_sparse_table, OwningOffsetSparseTableFamily);
 rmq_conformance!(value_sparse_table, ValueSparseTableFamily);
+rmq_conformance!(fast_value_sparse_table, FastValueSparseTableFamily);
 rmq_conformance!(packed_value_sparse_table, PackedValueSparseTableFamily);
-rmq_conformance!(offset_sparse_table4, OffsetSparseTable4Family);
+rmq_conformance!(fanout_value_sparse_table, FanoutValueSparseTableFamily);

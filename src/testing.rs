@@ -29,17 +29,11 @@ pub fn compare_with_naive<F: RMQFamily<u32>>(data: &[u32]) {
     let naive = NaiveRMQ::new(data);
     let test_object = F::Rmq::new(data);
     let n = data.len();
-    let check = |l: usize, r: usize| {
-        assert_eq!(
-            test_object.rmq(l, r),
-            naive.rmq(l, r),
-            "n = {n}: rmq({l}, {r})"
-        );
-    };
+    let mut queries: Vec<(usize, usize)> = vec![];
     if n * (n + 1) / 2 <= 100 {
         for l in 0..n {
             for r in l..n {
-                check(l, r);
+                queries.push((l, r));
             }
         }
     } else {
@@ -48,8 +42,17 @@ pub fn compare_with_naive<F: RMQFamily<u32>>(data: &[u32]) {
             // This is not uniformly random
             let l = rng.random_range(0..n);
             let r = rng.random_range(l..n);
-            check(l, r);
+            queries.push((l, r));
         }
+    }
+    let expected: Vec<usize> = queries.iter().map(|&(l, r)| naive.rmq(l, r)).collect();
+    for (&(l, r), &e) in queries.iter().zip(&expected) {
+        assert_eq!(test_object.rmq(l, r), e, "n = {n}: rmq({l}, {r})");
+    }
+    let mut batch = vec![usize::MAX; queries.len()];
+    test_object.rmq_batch(&queries, &mut batch);
+    for ((&(l, r), &e), &b) in queries.iter().zip(&expected).zip(&batch) {
+        assert_eq!(b, e, "n = {n}: rmq_batch at ({l}, {r})");
     }
 }
 

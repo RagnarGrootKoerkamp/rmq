@@ -139,6 +139,7 @@ struct BenchmarkResult {
     query_time: DistStatistics,
     query_latency: DistStatistics,
     memory_bytes: usize,
+    query_batch_time: Option<DistStatistics>
 }
 
 fn verify_function<T: Copy, R, F, G, V>(
@@ -219,6 +220,42 @@ where
     }
 }
 
+fn time_function_batches<T: Copy, F, G>(
+    mut f: F,
+    warmup_repetitions: usize,
+    repetitions: usize,
+    batch_size: usize,
+    mut input_generator: G,
+) -> DistStatistics
+where
+    F: FnMut(&[T], &mut [usize]),
+    G: FnMut() -> T,
+{
+    assert_eq!(repetitions % batch_size, 0);
+    let mut warmup_outputs: Vec<usize> = vec![0; warmup_repetitions];
+    let warmup_inputs: Vec<T> = (0..warmup_repetitions).map(|_| input_generator()).collect();
+    for (data, output) in warmup_inputs.chunks_exact(batch_size).zip(warmup_outputs.chunks_exact_mut(batch_size)) {
+        f(data, output);
+    }
+    black_box(&warmup_outputs);
+
+
+    let mut outputs: Vec<usize> = vec![0; repetitions];
+    let inputs: Vec<T> = (0..repetitions).map(|_| input_generator()).collect();
+    let t = Instant::now();
+    for (data, output) in inputs.chunks_exact(batch_size).zip(outputs.chunks_exact_mut(batch_size)) {
+        f(data, output);
+    }
+    black_box(&outputs);
+    let duration = t.elapsed().as_secs_f64() / repetitions as f64;
+
+    DistStatistics {
+        mean: duration,
+        std_dev: 0f64,
+        median: duration,
+    }
+}
+
 const QUERY_WARMUP_REPETITIONS: usize = 100_000;
 const QUERY_REPETITIONS: usize = 1_000_000;
 
@@ -227,7 +264,7 @@ fn time_queries<'a, T: 'a, R: RMQ<'a, T>>(
     rmq: &R,
     dist: RangeDistribution,
     n: usize,
-) -> (DistStatistics, DistStatistics) {
+) -> (DistStatistics, DistStatistics, Option<DistStatistics>) {
     // Independent queries: the CPU overlaps their cache misses, so this measures throughput.
     let mut query_rng = get_rng();
     let query_time = time_function(
@@ -257,7 +294,18 @@ fn time_queries<'a, T: 'a, R: RMQ<'a, T>>(
         || dist.sample_range(&mut query_rng, n),
     );
 
-    (query_time, query_latency)
+    let mut batch_rng = get_rng();
+    let batch_time = Some(time_function_batches(
+        |queries, output| {
+            rmq.rmq_batch(black_box(queries), black_box(output));
+        },
+        QUERY_WARMUP_REPETITIONS,
+        QUERY_REPETITIONS,
+        1000,
+        || dist.sample_range(&mut batch_rng, n),
+    ));
+
+    (query_time, query_latency, batch_time)
 }
 
 /// Each family is benchmarked until its structure would exceed this many bytes.
@@ -297,7 +345,7 @@ fn run_benchmarks<T: RMQValue, F: RMQFamily<T>>(
         return None;
     }
 
-    let (query_time, query_latency) = time_queries(&rmq, dist, n);
+    let (query_time, query_latency, batch_time) = time_queries(&rmq, dist, n);
 
     if verify {
         // Verify the benchmark outputs by rerunning them and comparing against OffsetSparsetable
@@ -327,6 +375,7 @@ fn run_benchmarks<T: RMQValue, F: RMQFamily<T>>(
         query_time,
         query_latency,
         memory_bytes,
+        query_batch_time: batch_time
     })
 }
 
@@ -420,7 +469,11 @@ fn visit_all<T: RMQValue>(v: &mut impl RMQVisitor<T>) -> io::Result<()> {
 
 fn visit_fast<T: RMQValue + Into<u32>>(v: &mut impl RMQVisitor<T>) -> io::Result<()> {
     v.visit::<IndexSparseTableFamily>()?;
+    v.visit::<PackedIndexSparseTableFamily>()?;
     v.visit::<ValueSparseTableFamily>()?;
+    v.visit::<FastValueSparseTableFamily>()?;
+    v.visit::<FanoutValueSparseTableFamily>()?;
+    v.visit::<OffsetSparseTableFamily>()?;
 
     Ok(())
 }
@@ -647,14 +700,14 @@ fn run_ranges_once<Family: RMQFamily<u32>>(out: &mut impl Write) -> std::io::Res
     // benchmarked structure itself.
     for b in 1..=24 {
         let dist = RangeDistribution::PowerOfTwo(b);
-        let (query_time, query_latency) = time_queries(&rmq, dist, n);
+        let (query_time, query_latency, _) = time_queries(&rmq, dist, n);
         let res = RangesResult {
             name: <Family as RMQFamily<u32>>::NAME,
             params: <Family as RMQFamily<u32>>::PARAMS.iter().copied().collect(),
             distribution: dist.name(),
             n,
             query_time,
-            query_latency,
+            query_latency
         };
         serde_json::to_writer(&mut *out, &res)?;
         out.write_all(b"\n")?;
