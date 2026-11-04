@@ -10,7 +10,9 @@
 
 use std::{ffi::c_void, ptr::NonNull};
 
-use crate::base::{MemoryUsage, RMQ};
+use mem_dbg::{FlatType, HashMap, MemDbgImpl, MemSize, SizeFlags};
+
+use crate::base::RMQ;
 
 #[doc(hidden)]
 #[derive(Clone, Copy)]
@@ -94,11 +96,19 @@ impl<'a, T: FLRMQValue, const EPSILON: usize> RMQ<'a, T> for FLRMQ<'a, T, EPSILO
     }
 }
 
-impl<'a, T: FLRMQValue, const EPSILON: usize> MemoryUsage for FLRMQ<'a, T, EPSILON> {
-    fn memory_allocated(&self) -> usize {
-        unsafe { (Self::OPS.mem)(self.ptr.as_ptr()) }
+// The C++ structure is opaque, so these are written by hand: the struct itself
+// plus what the library reports. `mem_dbg` prints the total without a breakdown.
+impl<'a, T: FLRMQValue, const EPSILON: usize> FlatType for FLRMQ<'a, T, EPSILON> {
+    type Flat = mem_dbg::False;
+}
+
+impl<'a, T: FLRMQValue, const EPSILON: usize> MemSize for FLRMQ<'a, T, EPSILON> {
+    fn mem_size_rec(&self, _flags: SizeFlags, _refs: &mut HashMap<usize, usize>) -> usize {
+        size_of::<Self>() + unsafe { (Self::OPS.mem)(self.ptr.as_ptr()) }
     }
 }
+
+impl<'a, T: FLRMQValue, const EPSILON: usize> MemDbgImpl for FLRMQ<'a, T, EPSILON> {}
 
 impl<'a, T: FLRMQValue, const EPSILON: usize> Drop for FLRMQ<'a, T, EPSILON> {
     fn drop(&mut self) {

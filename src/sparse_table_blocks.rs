@@ -1,22 +1,18 @@
+use mem_dbg::{MemDbg, MemSize};
 use sux::{
     bits::{BitFieldVec, BitFieldVecU},
     traits::{SliceByValue, SliceByValueMut, TryIntoUnaligned},
 };
 
 use crate::{
-    base::{MemoryUsage, RMQ, TwoArgMin},
+    base::{RMQ, TwoArgMin},
     sparse_table::{IndexST, OwningOffsetSparseTable},
 };
 
+#[derive(MemSize, MemDbg)]
 pub struct StridedIndexSparseTable<'a, T, const B: usize> {
     data: &'a [T],
     sparse_table: OwningOffsetSparseTable<'a, T>,
-}
-
-impl<'a, T, const B: usize> MemoryUsage for StridedIndexSparseTable<'a, T, B> {
-    fn memory_allocated(&self) -> usize {
-        self.sparse_table.memory_allocated()
-    }
 }
 
 impl<'a, T: Ord + Copy, const B: usize> RMQ<'a, T> for StridedIndexSparseTable<'a, T, B> {
@@ -83,17 +79,12 @@ crate::rmq_family! {
     pub StridedIndexSparseTableFamily<const B: usize> => StridedIndexSparseTable where T: Ord + Copy
 }
 
+#[derive(MemSize, MemDbg)]
 pub struct StridedIndexAffixMasksSparseTable<'a, T, const B: usize> {
     data: &'a [T],
     sparse_table: OwningOffsetSparseTable<'a, T>,
     // Bit i set iff data[i] is a prefix or suffix minimum of its block
     affix_bits: Box<[u64]>,
-}
-
-impl<'a, T, const B: usize> MemoryUsage for StridedIndexAffixMasksSparseTable<'a, T, B> {
-    fn memory_allocated(&self) -> usize {
-        self.sparse_table.memory_allocated() + self.affix_bits.len() * size_of::<u64>()
-    }
 }
 
 impl<'a, T: Ord + Copy, const B: usize> RMQ<'a, T> for StridedIndexAffixMasksSparseTable<'a, T, B> {
@@ -223,17 +214,12 @@ crate::rmq_family! {
     pub StridedIndexAffixMasksSparseTableFamily<const B: usize> => StridedIndexAffixMasksSparseTable where T: Ord + Copy
 }
 
+#[derive(MemSize, MemDbg)]
 pub struct StridedIndexMinHeapSparseTable<'a, T, const B: usize> {
     data: &'a [T],
     sparse_table: OwningOffsetSparseTable<'a, T>,
     // One 2B-bit cartesian tree identifier per block
     block_ids: BitFieldVec,
-}
-
-impl<'a, T, const B: usize> MemoryUsage for StridedIndexMinHeapSparseTable<'a, T, B> {
-    fn memory_allocated(&self) -> usize {
-        self.sparse_table.memory_allocated() + self.block_ids.memory_allocated()
-    }
 }
 
 impl<'a, T: Ord + Copy, const B: usize> RMQ<'a, T> for StridedIndexMinHeapSparseTable<'a, T, B> {
@@ -302,6 +288,7 @@ crate::rmq_family! {
     pub StridedIndexMinHeapSparseTableFamily<const B: usize> => StridedIndexMinHeapSparseTable where T: Ord + Copy
 }
 
+#[derive(MemSize, MemDbg)]
 pub struct BitBlocksSparseTable<'a, T, const B: usize> {
     data: &'a [T],
     stack: BitFieldVecU<Box<[u64]>>,
@@ -315,12 +302,6 @@ fn in_window(stack: &BitFieldVecU<Box<[u64]>>, l: usize, r: usize) -> usize {
     // SAFETY: callers only pass r < n.
     let word = unsafe { stack.get_value_unchecked(r) };
     r + (word & mask).leading_zeros() as usize - 63
-}
-
-impl<'a, T, const B: usize> MemoryUsage for BitBlocksSparseTable<'a, T, B> {
-    fn memory_allocated(&self) -> usize {
-        std::mem::size_of_val(self.stack.as_ref()) + self.block_sparse_table.memory_allocated()
-    }
 }
 
 impl<'a, T: Ord, const B: usize> RMQ<'a, T> for BitBlocksSparseTable<'a, T, B> {

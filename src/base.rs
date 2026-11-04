@@ -1,6 +1,7 @@
+use mem_dbg::{MemDbg, MemSize};
 use sux::{
     bits::{BitFieldVec, BitFieldVecU},
-    traits::{BitWidth, SliceByValue, SliceByValueMut, TryIntoUnaligned, Word},
+    traits::{SliceByValue, SliceByValueMut, TryIntoUnaligned, Word},
 };
 
 pub trait RMQ<'a, T: Sized> {
@@ -18,7 +19,9 @@ pub trait RMQ<'a, T: Sized> {
 }
 
 pub trait RMQFamily<T> {
-    type Rmq<'a>: RMQ<'a, T> + MemoryUsage
+    /// `MemSize::mem_size` gives the total size (struct plus heap). Borrowed
+    /// input data is not counted unless `SizeFlags::FOLLOW_REFS` is passed.
+    type Rmq<'a>: RMQ<'a, T> + MemSize + MemDbg
     where
         T: 'a;
 
@@ -30,7 +33,8 @@ pub trait RMQFamily<T> {
 /// `$rmq` must be an identifier in scope at the call site. Family types are
 /// never instantiated; they exist only so generic code can name the structure
 /// without committing to an input lifetime. Bounds on `T` default to `Ord`;
-/// pass `where T: ...` to override them.
+/// pass `where T: ...` to override them. `T: MemSize + MemDbg + FlatType` is
+/// always added, since the derived impls need `&'a [T]: MemSize + MemDbg`.
 ///
 /// Const parameters can be declared on the family (`Family<const B: usize>`);
 /// they are forwarded in order after `T`, so the structure must have the form
@@ -45,7 +49,7 @@ macro_rules! rmq_family {
         impl<T $($(, const $p: $pty)+)?> $crate::base::RMQFamily<T>
             for $family $(<$($p),+>)?
         where
-            T: $($bound)+
+            T: $($bound)+ + ::mem_dbg::MemSize + ::mem_dbg::MemDbg + ::mem_dbg::FlatType
         {
             type Rmq<'a>
                 = $rmq<'a, T $($(, $p)+)?>
@@ -74,49 +78,6 @@ pub trait TwoArgMin {
 impl<T: Ord> TwoArgMin for &[T] {
     fn argmin(&self, a: usize, b: usize) -> usize {
         if self[a] <= self[b] { a } else { b }
-    }
-}
-
-pub trait MemoryUsage: Sized {
-    /// Heap bytes allocated by this structure, excluding the struct itself
-    /// and the borrowed input data.
-    fn memory_allocated(&self) -> usize;
-
-    fn memory_total(&self) -> usize {
-        std::mem::size_of::<Self>() + self.memory_allocated()
-    }
-}
-
-impl<T> MemoryUsage for Vec<T>
-where
-    T: Sized,
-{
-    fn memory_allocated(&self) -> usize {
-        self.len() * size_of::<T>()
-    }
-}
-
-impl<W: sux::traits::Word> MemoryUsage for sux::bits::BitFieldVec<Vec<W>> {
-    /// Bytes used by the packed backing words; ignores struct and capacity overhead.
-    fn memory_allocated(&self) -> usize {
-        let word_bits = 8 * size_of::<W>();
-        (self.len() * self.bit_width()).div_ceil(word_bits) * size_of::<W>()
-    }
-}
-
-impl<W: sux::traits::Word> MemoryUsage for sux::bits::BitFieldVec<Box<[W]>> {
-    /// Bytes used by the packed backing words; ignores struct and capacity overhead.
-    fn memory_allocated(&self) -> usize {
-        let word_bits = 8 * size_of::<W>();
-        (self.len() * self.bit_width()).div_ceil(word_bits) * size_of::<W>()
-    }
-}
-
-impl<W: Word> MemoryUsage for BitFieldVecU<Box<[W]>> {
-    /// Bytes used by the packed backing words; ignores struct and padding overhead.
-    fn memory_allocated(&self) -> usize {
-        let word_bits = 8 * size_of::<W>();
-        (self.len() * self.bit_width()).div_ceil(word_bits) * size_of::<W>()
     }
 }
 

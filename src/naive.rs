@@ -1,12 +1,9 @@
-use crate::base::{MemoryUsage, RMQ};
+use mem_dbg::{MemDbg, MemSize};
 
+use crate::base::RMQ;
+
+#[derive(MemSize, MemDbg)]
 pub struct NaiveRMQ<'a, T: Ord>(&'a [T]);
-
-impl<'a, T: Ord> MemoryUsage for NaiveRMQ<'a, T> {
-    fn memory_allocated(&self) -> usize {
-        0
-    }
-}
 
 impl<'a, T: Ord> RMQ<'a, T> for NaiveRMQ<'a, T> {
     fn new(data: &'a [T]) -> Self {

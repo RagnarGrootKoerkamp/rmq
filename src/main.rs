@@ -8,9 +8,10 @@ use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 use needletail::{parse_fastx_file};
-use rmq::base::{MemoryUsage, RMQ, RMQFamily};
+use mem_dbg::{FlatType, MemDbg, MemSize, SizeFlags};
+use rmq::base::{RMQ, RMQFamily};
 use rmq::bbst::BbSTValue;
-use rmq::sparse_table::{OffsetSparseTable, OldValueSparseTableFamily};
+use rmq::sparse_table::OffsetSparseTable;
 use rmq::*;
 
 use rand::prelude::*;
@@ -22,7 +23,7 @@ fn get_rng() -> Xoshiro256PlusPlus {
     Xoshiro256PlusPlus::seed_from_u64(42)
 }
 
-trait RMQValue: Copy + Ord {
+trait RMQValue: Copy + Ord + MemDbg + FlatType {
     /// Truncating cast, like `x as Self`.
     fn from_u64(x: u64) -> Self;
 }
@@ -291,7 +292,7 @@ fn run_benchmarks<T: RMQValue, F: RMQFamily<T>>(
     };
 
     let rmq = F::Rmq::new(&data);
-    let memory_bytes = rmq.memory_total();
+    let memory_bytes = rmq.mem_size(SizeFlags::default());
     if env::var("IGNORE_MEM_THRESHOLD").is_err() && memory_bytes > MEMORY_THRESHOLD_BYTES {
         return None;
     }

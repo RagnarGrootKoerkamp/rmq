@@ -1153,6 +1153,7 @@ dependencies = [
  "clap",
  "criterion 0.8.2",
  "libsais",
+ "mem_dbg",
  "needletail",
  "rand",
  "rmq",

@@ -1,20 +1,17 @@
-use crate::base::{MemoryUsage, RMQ, TwoArgMin};
+use mem_dbg::{MemDbg, MemSize};
+
+use crate::base::{RMQ, TwoArgMin};
 
 use sux::{
     bits::BitFieldVec,
     traits::{SliceByValue, SliceByValueMut},
 };
 
+#[derive(MemSize, MemDbg)]
 pub struct RMQTree<'a, T> {
     n: usize,
     data: &'a [T],
     tree: Vec<usize>,
-}
-
-impl<'a, T> MemoryUsage for RMQTree<'a, T> {
-    fn memory_allocated(&self) -> usize {
-        self.tree.len() * std::mem::size_of::<usize>()
-    }
 }
 
 impl<'a, T: Ord> RMQ<'a, T> for RMQTree<'a, T> {
@@ -75,16 +72,11 @@ crate::rmq_family! {
     pub RMQTreeFamily => RMQTree
 }
 
+#[derive(MemSize, MemDbg)]
 pub struct PackedRMQTree<'a, T> {
     n: usize,
     data: &'a [T],
     tree: BitFieldVec,
-}
-
-impl<'a, T> MemoryUsage for PackedRMQTree<'a, T> {
-    fn memory_allocated(&self) -> usize {
-        self.tree.memory_allocated()
-    }
 }
 
 impl<'a, T: Ord> RMQ<'a, T> for PackedRMQTree<'a, T> {

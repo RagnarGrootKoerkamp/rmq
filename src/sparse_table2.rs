@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
+use mem_dbg::{MemDbg, MemSize};
+
 use crate::{
-    base::{MemoryUsage, RMQ, TwoArgMin},
+    base::{RMQ, TwoArgMin},
     cartesian_tree::convert_to_minheap,
     sparse_table::{CustomOffsetST, Getter, IndexST, PositionOffsetSparseTable},
 };
@@ -11,6 +13,7 @@ use sux::{
     traits::{SliceByValue, SliceByValueMut},
 };
 
+#[derive(MemSize, MemDbg)]
 pub struct STLookupBlocksInner<'a, T> {
     data: &'a [T],
     b: usize,
@@ -32,6 +35,7 @@ impl<'a, T: Ord> STLookupBlocksInner<'a, T> {
     }
 }
 
+#[derive(MemSize, MemDbg)]
 pub struct SparseTableCartesianBlocks<'a, T> {
     block_sparse_table: CustomOffsetST<'a, T, STLookupBlocksInner<'a, T>>,
 }
@@ -54,15 +58,6 @@ fn fill_block_answers<T: Ord>(block: &[T], s: usize, out: &mut [u16]) {
             }
             out[_range_index(l, r)] = min_idx as u16;
         }
-    }
-}
-
-impl<'a, T> MemoryUsage for SparseTableCartesianBlocks<'a, T> {
-    fn memory_allocated(&self) -> usize {
-        let inner = &self.block_sparse_table.getter;
-        inner.block_id.memory_allocated()
-            + inner.block_responses.memory_allocated()
-            + self.block_sparse_table.memory_allocated()
     }
 }
 
@@ -139,6 +134,7 @@ crate::rmq_family! {
     pub SparseTableCartesianBlocksFamily => SparseTableCartesianBlocks where T: Ord + Copy
 }
 
+#[derive(MemSize, MemDbg)]
 pub struct SparseTable3<'a, T> {
     n: usize,
     s: usize,
@@ -147,15 +143,6 @@ pub struct SparseTable3<'a, T> {
     t: BitFieldVec,
     t_: BitFieldVec,
     oblock_table: PositionOffsetSparseTable<'a, T>,
-}
-
-impl<'a, T> MemoryUsage for SparseTable3<'a, T> {
-    fn memory_allocated(&self) -> usize {
-        self.p.memory_allocated()
-            + self.t.memory_allocated()
-            + self.t_.memory_allocated()
-            + self.oblock_table.memory_allocated()
-    }
 }
 
 impl<'a, T: Ord> SparseTable3<'a, T> {

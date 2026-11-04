@@ -1,29 +1,18 @@
-use std::{
-    marker::PhantomData,
-    mem::{ManuallyDrop, MaybeUninit},
-};
+use std::{marker::PhantomData, ptr::NonNull};
 
-use crate::base::{BuildableSlice, MemoryUsage, RMQ, TwoArgMin};
+use mem_dbg::{FlatType, HashMap, MemDbg, MemDbgImpl, MemSize, SizeFlags};
+
+use crate::base::{BuildableSlice, RMQ, TwoArgMin};
 
 use sux::{
     bits::{BitFieldVec, BitFieldVecU},
     traits::{SliceByValue, SliceByValueMut, TryIntoUnaligned},
 };
 
+#[derive(MemSize, MemDbg)]
 pub struct OffsetSparseTable<'a, T> {
     data: &'a [T],
     offsets: Vec<BitFieldVecU<Box<[usize]>>>,
-}
-
-impl<'a, T> MemoryUsage for OffsetSparseTable<'a, T> {
-    fn memory_allocated(&self) -> usize {
-        self.offsets.len() * std::mem::size_of::<BitFieldVecU<Box<[usize]>>>()
-            + self
-                .offsets
-                .iter()
-                .map(|o| o.memory_allocated())
-                .sum::<usize>()
-    }
 }
 
 impl<'a, T: Ord> RMQ<'a, T> for OffsetSparseTable<'a, T> {
@@ -77,6 +66,7 @@ crate::rmq_family! {
     pub OffsetSparseTableFamily => OffsetSparseTable
 }
 
+#[derive(MemSize, MemDbg)]
 pub struct IndexST<'a, T, C = Vec<usize>> {
     n: usize,
     k_max: usize,
@@ -116,12 +106,6 @@ impl<'a, T: Ord, C: BuildableSlice<Value = usize>> IndexST<'a, T, C> {
     }
 }
 
-impl<'a, T, C: MemoryUsage> MemoryUsage for IndexST<'a, T, C> {
-    fn memory_allocated(&self) -> usize {
-        self.indices.memory_allocated()
-    }
-}
-
 impl<'a, T: Ord, C: BuildableSlice<Value = usize>> RMQ<'a, T> for IndexST<'a, T, C> {
     fn new(data: &'a [T]) -> Self
     where
@@ -156,6 +140,7 @@ crate::rmq_family! {
     pub PackedIndexSparseTableFamily => PackedIndexST
 }
 
+#[derive(MemSize, MemDbg)]
 pub struct PositionOffsetSparseTable<'a, T> {
     data: &'a [T],
     positions: BitFieldVecU<Box<[usize]>>,
@@ -218,18 +203,6 @@ impl<'a, T: Ord> PositionOffsetSparseTable<'a, T> {
     }
 }
 
-impl<'a, T> MemoryUsage for PositionOffsetSparseTable<'a, T> {
-    fn memory_allocated(&self) -> usize {
-        self.positions.memory_allocated()
-            + self.offsets.len() * std::mem::size_of::<BitFieldVecU<Box<[usize]>>>()
-            + self
-                .offsets
-                .iter()
-                .map(|o| o.memory_allocated())
-                .sum::<usize>()
-    }
-}
-
 impl<'a, T: Ord> RMQ<'a, T> for PositionOffsetSparseTable<'a, T> {
     fn new(data: &'a [T]) -> Self
     where
@@ -273,6 +246,7 @@ impl<T, F: Fn(usize) -> T> Getter<T> for F {
     }
 }
 
+#[derive(MemSize, MemDbg)]
 pub struct SliceGetter<'a, T>(&'a [T]);
 impl<'a, T: Copy> Getter<T> for SliceGetter<'a, T> {
     #[inline]
@@ -281,6 +255,7 @@ impl<'a, T: Copy> Getter<T> for SliceGetter<'a, T> {
     }
 }
 
+#[derive(MemSize, MemDbg)]
 pub struct CustomOffsetST<'a, T, U> {
     pub getter: U,
     offsets: Vec<BitFieldVec>,
@@ -350,18 +325,6 @@ impl<'a, T: Ord, U: Getter<T>> CustomOffsetST<'a, T, U> {
     }
 }
 
-impl<'a, T, U> MemoryUsage for CustomOffsetST<'a, T, U> {
-    /// Offset tables only; whatever the getter owns is counted by the caller.
-    fn memory_allocated(&self) -> usize {
-        self.offsets.len() * std::mem::size_of::<BitFieldVec>()
-            + self
-                .offsets
-                .iter()
-                .map(|o| o.memory_allocated())
-                .sum::<usize>()
-    }
-}
-
 pub type SliceOffsetST<'a, T> = CustomOffsetST<'a, T, SliceGetter<'a, T>>;
 
 impl<'a, T: Ord + Copy> RMQ<'a, T> for SliceOffsetST<'a, T> {
@@ -381,10 +344,11 @@ crate::rmq_family! {
     pub CustomOffsetSparseTableFamily => SliceOffsetST where T: Ord + Copy
 }
 
+#[derive(MemSize, MemDbg)]
 pub struct ValueSparseTable<'a, T> {
     n: usize,
     k_max: usize,
-    entries: Vec<MaybeUninit<u64>>,
+    entries: Vec<u64>,
     _marker: PhantomData<&'a T>,
 }
 
@@ -395,28 +359,21 @@ impl<'a, T: Copy + Into<u32>> ValueSparseTable<'a, T> {
         let mut table = Self {
             n,
             k_max,
-            entries: vec![MaybeUninit::uninit(); (k_max + 1) * n],
+            entries: vec![0; (k_max + 1) * n],
             _marker: PhantomData,
         };
 
         for i in 0..n {
-            table.entries[i].write((data[indices[i]].into() as u64) << 32 | (i as u64));
+            table.entries[i] = (data[indices[i]].into() as u64) << 32 | (i as u64);
         }
         for k in 1..=table.k_max {
             for i in 0..table.n + 1 - (1 << k) {
-                let lentry = unsafe { table.entries[(k - 1) * table.n + i].assume_init() };
-                let rentry =
-                    unsafe { table.entries[(k - 1) * table.n + i + (1 << (k - 1))].assume_init() };
-                table.entries[k * n + i].write(lentry.min(rentry));
+                let lentry = table.entries[(k - 1) * table.n + i];
+                let rentry = table.entries[(k - 1) * table.n + i + (1 << (k - 1))];
+                table.entries[k * n + i] = lentry.min(rentry);
             }
         }
         table
-    }
-}
-
-impl<'a, T> MemoryUsage for ValueSparseTable<'a, T> {
-    fn memory_allocated(&self) -> usize {
-        self.entries.len() * std::mem::size_of::<MaybeUninit<(usize, T)>>()
     }
 }
 
@@ -432,8 +389,8 @@ impl<'a, T: Copy + Into<u32>> RMQ<'a, T> for ValueSparseTable<'a, T> {
     // Queries [l, r]
     fn rmq(&self, l: usize, r: usize) -> usize {
         let k = (r - l + 1).ilog2() as usize;
-        let left_entry = unsafe { self.entries[k * self.n + l].assume_init() };
-        let right_entry = unsafe { self.entries[k * self.n + r + 1 - (1 << k)].assume_init() };
+        let left_entry = self.entries[k * self.n + l];
+        let right_entry = self.entries[k * self.n + r + 1 - (1 << k)];
 
         ((left_entry.min(right_entry)) & ((1u64 << 32) - 1)) as usize
     }
@@ -443,6 +400,7 @@ crate::rmq_family! {
     pub ValueSparseTableFamily => ValueSparseTable where T: Copy + Into<u32>
 }
 
+#[derive(MemSize, MemDbg)]
 pub struct PackedValueSparseTable<'a, T> {
     n: usize,
     k_max: usize,
@@ -489,12 +447,6 @@ impl<'a, T: Copy + Into<u64>> PackedValueSparseTable<'a, T> {
     }
 }
 
-impl<'a, T> MemoryUsage for PackedValueSparseTable<'a, T> {
-    fn memory_allocated(&self) -> usize {
-        self.entries.memory_allocated()
-    }
-}
-
 impl<'a, T: Copy + Into<u64>> RMQ<'a, T> for PackedValueSparseTable<'a, T> {
     fn new(data: &'a [T]) -> Self
     where
@@ -523,11 +475,49 @@ crate::rmq_family! {
     pub PackedValueSparseTableFamily => PackedValueSparseTable where T: Copy + Into<u64>
 }
 
+/// An owned heap slice held through a raw pointer rather than a `Box`, so the
+/// borrow `OwningRMQWrapper::inner` takes of it stays valid when the wrapper
+/// moves (a `Box` would assert unique access on every move).
+pub struct RawBoxedSlice<V>(NonNull<[V]>);
+
+impl<V> RawBoxedSlice<V> {
+    fn new(values: Box<[V]>) -> Self {
+        Self(NonNull::from(Box::leak(values)))
+    }
+
+    /// # Safety
+    /// The returned slice must not outlive `self`.
+    unsafe fn as_slice<'b>(&self) -> &'b [V] {
+        unsafe { self.0.as_ref() }
+    }
+}
+
+impl<V> Drop for RawBoxedSlice<V> {
+    fn drop(&mut self) {
+        drop(unsafe { Box::from_raw(self.0.as_ptr()) });
+    }
+}
+
+impl<V> FlatType for RawBoxedSlice<V> {
+    type Flat = mem_dbg::False;
+}
+
+impl<V: MemSize + FlatType> MemSize for RawBoxedSlice<V> {
+    fn mem_size_rec(&self, flags: SizeFlags, refs: &mut HashMap<usize, usize>) -> usize {
+        // The pointer itself plus the owned heap block, like `Box<[V]>`.
+        size_of::<Self>() + unsafe { self.as_slice() }.mem_size_rec(flags, refs)
+    }
+}
+
+impl<V: MemSize + FlatType> MemDbgImpl for RawBoxedSlice<V> {}
+
+#[derive(MemSize, MemDbg)]
 pub struct OwningRMQWrapper<'a, V, R> {
     positions: BitFieldVec,
-    // Fix: Incorrect lifetime, `inner` actually borrows from `values`
-    inner: ManuallyDrop<R>,
-    values: *mut [V],
+    // Fix: Incorrect lifetime, `inner` actually borrows from `values`.
+    // Fields drop in declaration order, so `inner` is dropped before `values`.
+    inner: R,
+    values: RawBoxedSlice<V>,
     _marker: PhantomData<&'a V>,
 }
 
@@ -540,13 +530,13 @@ impl<'a, V: Copy, R: RMQ<'a, V>> OwningRMQWrapper<'a, V, R> {
         for i in 0..n {
             packed_positions.set_value(i, positions[i]);
         }
-        let values: *mut [V] =
-            Box::into_raw(positions.iter().map(|&i| data[i]).collect::<Box<[V]>>());
-        let inner = R::new(unsafe { &*values });
+        let values = RawBoxedSlice::new(positions.iter().map(|&i| data[i]).collect());
+        // SAFETY: `inner` is stored next to `values` and dropped before it.
+        let inner = R::new(unsafe { values.as_slice() });
 
         Self {
             positions: packed_positions,
-            inner: ManuallyDrop::new(inner),
+            inner,
             values,
             _marker: PhantomData,
         }
@@ -555,23 +545,6 @@ impl<'a, V: Copy, R: RMQ<'a, V>> OwningRMQWrapper<'a, V, R> {
     #[inline]
     fn position(&self, slot: usize) -> usize {
         unsafe { self.positions.get_value_unchecked(slot) }
-    }
-}
-
-impl<'a, V, R> Drop for OwningRMQWrapper<'a, V, R> {
-    fn drop(&mut self) {
-        unsafe {
-            ManuallyDrop::drop(&mut self.inner); // drop the borrower first
-            drop(Box::from_raw(self.values)); // then the owner
-        }
-    }
-}
-
-impl<'a, V, R: MemoryUsage> MemoryUsage for OwningRMQWrapper<'a, V, R> {
-    fn memory_allocated(&self) -> usize {
-        self.positions.memory_allocated()
-            + self.inner.memory_allocated()
-            + self.values.len() * std::mem::size_of::<V>()
     }
 }
 
@@ -595,6 +568,7 @@ crate::rmq_family! {
     pub OwningOffsetSparseTableFamily => OwningOffsetSparseTable where T: Ord + Copy
 }
 
+#[derive(MemSize, MemDbg)]
 pub struct OffsetSparseTable4<'a, T> {
     data: &'a [T],
     offsets: Vec<BitFieldVecU<Box<[usize]>>>,
@@ -606,17 +580,6 @@ pub struct OffsetSparseTable4<'a, T> {
 fn transposed_slot(i: usize, k: usize, n: usize) -> usize {
     let rows = (n + (1 << k) - 1) >> k;
     (i & ((1 << k) - 1)) * rows + (i >> k)
-}
-
-impl<'a, T> MemoryUsage for OffsetSparseTable4<'a, T> {
-    fn memory_allocated(&self) -> usize {
-        self.offsets.len() * std::mem::size_of::<BitFieldVecU<Box<[usize]>>>()
-            + self
-                .offsets
-                .iter()
-                .map(|o| o.memory_allocated())
-                .sum::<usize>()
-    }
 }
 
 impl<'a, T: Ord> RMQ<'a, T> for OffsetSparseTable4<'a, T> {

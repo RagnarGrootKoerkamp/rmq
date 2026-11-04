@@ -1,3 +1,5 @@
+use mem_dbg::{DbgFlags, MemDbg, MemSize, SizeFlags};
+
 use crate::{
     base::{RMQ, RMQFamily},
     naive::NaiveRMQ,
@@ -105,6 +107,20 @@ pub fn test_edge_ranges<F: RMQFamily<u32>>() {
     }
 }
 
+// The reported size includes at least the struct itself, and `mem_dbg` can
+// walk the structure without panicking.
+pub fn test_mem_size<F: RMQFamily<u32>>() {
+    let data = get_random_permutation(&mut get_rng(), 1000);
+    let test_object = F::Rmq::new(&data);
+    let size = test_object.mem_size(SizeFlags::default());
+    assert!(size >= size_of_val(&test_object), "mem_size = {size}");
+    let mut out = String::new();
+    test_object
+        .mem_dbg_on(&mut out, DbgFlags::default())
+        .unwrap();
+    assert!(!out.is_empty());
+}
+
 // Declares one `#[test]` per shared check, in a module named `$name`, for the
 // implementation named by the family `$family`.
 #[macro_export]
@@ -137,6 +153,11 @@ macro_rules! rmq_conformance {
             #[test]
             fn edge_ranges() {
                 $crate::testing::test_edge_ranges::<$family>();
+            }
+
+            #[test]
+            fn mem_size() {
+                $crate::testing::test_mem_size::<$family>();
             }
         }
     };

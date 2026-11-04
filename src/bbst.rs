@@ -10,7 +10,9 @@ use std::{
     ptr::NonNull,
 };
 
-use crate::base::{MemoryUsage, RMQ};
+use mem_dbg::{FlatType, HashMap, MemDbgImpl, MemSize, SizeFlags};
+
+use crate::base::RMQ;
 
 type NewFn<T> = unsafe extern "C" fn(*const T, u32, c_int) -> *mut c_void;
 type NewMiniFn<T> = unsafe extern "C" fn(*const T, u32, c_int, c_int) -> *mut c_void;
@@ -152,11 +154,19 @@ impl<'a, T: BbSTValue, const K_EXP: u32> RMQ<'a, T> for BbST<'a, T, K_EXP> {
     }
 }
 
-impl<'a, T: BbSTValue, const K_EXP: u32> MemoryUsage for BbST<'a, T, K_EXP> {
-    fn memory_allocated(&self) -> usize {
-        unsafe { (T::BBST.mem)(self.ptr.as_ptr()) }
+// The C++ structure is opaque, so these are written by hand: the struct itself
+// plus what the library reports. `mem_dbg` prints the total without a breakdown.
+impl<'a, T: BbSTValue, const K_EXP: u32> FlatType for BbST<'a, T, K_EXP> {
+    type Flat = mem_dbg::False;
+}
+
+impl<'a, T: BbSTValue, const K_EXP: u32> MemSize for BbST<'a, T, K_EXP> {
+    fn mem_size_rec(&self, _flags: SizeFlags, _refs: &mut HashMap<usize, usize>) -> usize {
+        size_of::<Self>() + unsafe { (T::BBST.mem)(self.ptr.as_ptr()) }
     }
 }
+
+impl<'a, T: BbSTValue, const K_EXP: u32> MemDbgImpl for BbST<'a, T, K_EXP> {}
 
 impl<'a, T: BbSTValue, const K_EXP: u32> Drop for BbST<'a, T, K_EXP> {
     fn drop(&mut self) {
@@ -201,12 +211,23 @@ impl<'a, T: BbSTValue, const K_EXP: u32, const MINI_K_EXP: u32> RMQ<'a, T>
     }
 }
 
-impl<'a, T: BbSTValue, const K_EXP: u32, const MINI_K_EXP: u32> MemoryUsage
+impl<'a, T: BbSTValue, const K_EXP: u32, const MINI_K_EXP: u32> FlatType
     for BbST2<'a, T, K_EXP, MINI_K_EXP>
 {
-    fn memory_allocated(&self) -> usize {
-        unsafe { (T::BBST2.mem)(self.ptr.as_ptr()) }
+    type Flat = mem_dbg::False;
+}
+
+impl<'a, T: BbSTValue, const K_EXP: u32, const MINI_K_EXP: u32> MemSize
+    for BbST2<'a, T, K_EXP, MINI_K_EXP>
+{
+    fn mem_size_rec(&self, _flags: SizeFlags, _refs: &mut HashMap<usize, usize>) -> usize {
+        size_of::<Self>() + unsafe { (T::BBST2.mem)(self.ptr.as_ptr()) }
     }
+}
+
+impl<'a, T: BbSTValue, const K_EXP: u32, const MINI_K_EXP: u32> MemDbgImpl
+    for BbST2<'a, T, K_EXP, MINI_K_EXP>
+{
 }
 
 impl<'a, T: BbSTValue, const K_EXP: u32, const MINI_K_EXP: u32> Drop
