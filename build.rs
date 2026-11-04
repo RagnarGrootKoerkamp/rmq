@@ -22,16 +22,41 @@ fn main() {
     println!("cargo:rerun-if-changed=FL-RMQ/include");
 
     let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
-    build_bbst(&out_dir);
-    build_flrmq(&out_dir);
+    let native = native_cpu_flag();
+    build_bbst(&out_dir, native);
+    build_flrmq(&out_dir, native);
 }
 
-fn build_bbst(out_dir: &std::path::Path) {
+/// The C++ counterpart of `-C target-cpu=native` (set in .cargo/config.toml), which
+/// cc doesn't forward. -O3 already enables the loop and SLP vectorizers.
+fn native_cpu_flag() -> &'static str {
+    assert_eq!(
+        std::env::var("HOST").unwrap(),
+        std::env::var("TARGET").unwrap(),
+        "the C++ libraries are compiled for the local CPU, so cross-compiling isn't supported"
+    );
+    // On AArch64, -mcpu selects both the instruction set and the tuning.
+    let candidates: &[&str] = if std::env::var("CARGO_CFG_TARGET_ARCH").unwrap() == "aarch64" {
+        &["-mcpu=native", "-march=native"]
+    } else {
+        &["-march=native"]
+    };
+    let mut probe = cc::Build::new();
+    probe.cpp(true);
+    candidates
+        .iter()
+        .copied()
+        .find(|f| probe.is_flag_supported(f).unwrap_or(false))
+        .expect("the C++ compiler supports neither -march=native nor -mcpu=native")
+}
+
+fn build_bbst(out_dir: &std::path::Path, native: &str) {
     let mut build = cc::Build::new();
     build
         .cpp(true)
         .std("c++11")
         .opt_level(3)
+        .flag(native)
         // ffi/include first, so its empty omp.h is used instead of the real one.
         .include("ffi/include")
         .include("BbST")
@@ -65,7 +90,7 @@ fn build_bbst(out_dir: &std::path::Path) {
     build.compile("bbst");
 }
 
-fn build_flrmq(out_dir: &std::path::Path) {
+fn build_flrmq(out_dir: &std::path::Path, native: &str) {
     let sdsl = "FL-RMQ/libs/sdsl-lite/include";
     assert!(
         std::path::Path::new(sdsl).is_dir(),
@@ -77,6 +102,7 @@ fn build_flrmq(out_dir: &std::path::Path) {
         .cpp(true)
         .std("c++20")
         .opt_level(3)
+        .flag(native)
         .include("ffi/include")
         .include("FL-RMQ/include")
         .include(sdsl)

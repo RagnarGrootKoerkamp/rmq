@@ -384,11 +384,11 @@ crate::rmq_family! {
 pub struct ValueSparseTable<'a, T> {
     n: usize,
     k_max: usize,
-    entries: Vec<MaybeUninit<(usize, T)>>,
+    entries: Vec<MaybeUninit<u64>>,
     _marker: PhantomData<&'a T>,
 }
 
-impl<'a, T: Ord + Copy> ValueSparseTable<'a, T> {
+impl<'a, T: Copy + Into<u32>> ValueSparseTable<'a, T> {
     pub fn new(data: &'a [T], indices: &[usize]) -> Self {
         let n = indices.len();
         let k_max = n.ilog2() as usize;
@@ -400,14 +400,14 @@ impl<'a, T: Ord + Copy> ValueSparseTable<'a, T> {
         };
 
         for i in 0..n {
-            table.entries[i].write((indices[i], data[indices[i]]));
+            table.entries[i].write((data[indices[i]].into() as u64) << 32 | (i as u64));
         }
         for k in 1..=table.k_max {
             for i in 0..table.n + 1 - (1 << k) {
                 let lentry = unsafe { table.entries[(k - 1) * table.n + i].assume_init() };
                 let rentry =
                     unsafe { table.entries[(k - 1) * table.n + i + (1 << (k - 1))].assume_init() };
-                table.entries[k * n + i].write(if rentry.1 < lentry.1 { rentry } else { lentry });
+                table.entries[k * n + i].write(lentry.min(rentry));
             }
         }
         table
@@ -420,7 +420,7 @@ impl<'a, T> MemoryUsage for ValueSparseTable<'a, T> {
     }
 }
 
-impl<'a, T: Ord + Copy> RMQ<'a, T> for ValueSparseTable<'a, T> {
+impl<'a, T: Copy + Into<u32>> RMQ<'a, T> for ValueSparseTable<'a, T> {
     fn new(data: &'a [T]) -> Self
     where
         Self: Sized,
@@ -435,16 +435,12 @@ impl<'a, T: Ord + Copy> RMQ<'a, T> for ValueSparseTable<'a, T> {
         let left_entry = unsafe { self.entries[k * self.n + l].assume_init() };
         let right_entry = unsafe { self.entries[k * self.n + r + 1 - (1 << k)].assume_init() };
 
-        if right_entry.1 < left_entry.1 {
-            right_entry.0
-        } else {
-            left_entry.0
-        }
+        ((left_entry.min(right_entry)) & ((1u64 << 32) - 1)) as usize
     }
 }
 
 crate::rmq_family! {
-    pub ValueSparseTableFamily => ValueSparseTable where T: Ord + Copy
+    pub ValueSparseTableFamily => ValueSparseTable where T: Copy + Into<u32>
 }
 
 pub struct PackedValueSparseTable<'a, T> {

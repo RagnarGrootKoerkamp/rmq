@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::env;
+use std::{env, io};
 use std::fs::File;
 use std::hint::black_box;
 use std::io::{BufWriter, Write};
@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand};
 use needletail::{parse_fastx_file};
 use rmq::base::{MemoryUsage, RMQ, RMQFamily};
 use rmq::bbst::BbSTValue;
-use rmq::sparse_table::OffsetSparseTable;
+use rmq::sparse_table::{OffsetSparseTable, OldValueSparseTableFamily};
 use rmq::*;
 
 use rand::prelude::*;
@@ -395,34 +395,66 @@ macro_rules! for_each {
     };
 }
 
+trait RMQVisitor<T: RMQValue> {
+    fn visit<F: RMQFamily<T>>(&mut self) -> io::Result<()>;
+}
+
+fn visit_all<T: RMQValue>(v: &mut impl RMQVisitor<T>) -> io::Result<()> {
+    v.visit::<IndexSparseTableFamily>()?;
+    v.visit::<PackedIndexSparseTableFamily>()?;
+
+    v.visit::<OffsetSparseTableFamily>()?;
+
+    v.visit::<RMQTreeFamily>()?;
+
+    for_each!(B in [8, 16, 32, 64] { v.visit::<StridedIndexSparseTableFamily<B>>()?; });
+    for_each!(B in [8, 16, 32, 64] { v.visit::<StridedIndexAffixMasksSparseTableFamily<B>>()?; });
+    for_each!(B in [8, 16, 32, 64] { v.visit::<BitBlocksSparseTableFamily<B>>()?; });
+
+    v.visit::<SparseTableCartesianBlocksFamily>()?;
+    v.visit::<SparseTable3Family>()?;
+
+    Ok(())
+}
+
+fn visit_fast<T: RMQValue + Into<u32>>(v: &mut impl RMQVisitor<T>) -> io::Result<()> {
+    v.visit::<IndexSparseTableFamily>()?;
+    v.visit::<ValueSparseTableFamily>()?;
+
+    Ok(())
+}
+
+struct SizeSweep<'a, W> { out: &'a mut W, dist: RangeDistribution, min_n: usize, max_n: usize }
+
+impl<W: Write> RMQVisitor<u32> for SizeSweep<'_, W> {
+    fn visit<F: RMQFamily<u32>>(&mut self) -> std::io::Result<()> {
+        run_family::<u32, F>(self.out, self.dist, self.min_n, self.max_n)
+    }
+}
+
+struct FixedRun<'a, W, T> { out: &'a mut W, dist: RangeDistribution, data: &'a [T] }
+
+impl<W: Write, T: RMQValue> RMQVisitor<T> for FixedRun<'_, W, T> {
+    fn visit<F: RMQFamily<T>>(&mut self) -> std::io::Result<()> {
+        run_family_on_genome::<T, F>(self.out, self.dist, self.data)
+    }
+}
+
+struct RangesRun<'a, W> { out: &'a mut W }
+
+impl<W: Write> RMQVisitor<u32> for RangesRun<'_, W> {
+    fn visit<F: RMQFamily<u32>>(&mut self) -> std::io::Result<()> {
+        run_ranges_once::<F>(self.out)
+    }
+}
+
 fn run_all(
     out: &mut impl Write,
     dist: RangeDistribution,
     min_n: usize,
     max_n: usize,
 ) -> std::io::Result<()> {
-    run_family::<u32, OffsetSparseTableFamily>(out, dist, min_n, max_n)?;
-    run_family::<u32, OffsetSparseTable4Family>(out, dist, min_n, max_n)?;
-    // Baselines
-    //run_family::<u32, IndexSparseTableFamily>(out, dist, min_n, max_n)?;
-    //run_family::<u32, PackedIndexSparseTableFamily>(out, dist, min_n, max_n)?;
-    //run_family::<u32, OffsetSparseTableFamily>(out, dist, min_n, max_n)?;
-    // run_family::<u32, RMQTreeFamily>(out, dist, min_n, max_n)?;
-/* 
-    // Block structures, compared at equal block sizes
-    for_each!(B in [8, 16, 32, 64] {
-        run_family::<u32, StridedIndexSparseTableFamily<B>>(out, dist, min_n, max_n)?;
-    });
-    for_each!(B in [8, 16, 32, 64] {
-        run_family::<u32, StridedIndexAffixMasksSparseTableFamily<B>>(out, dist, min_n, max_n)?;
-    });
-    for_each!(B in [8, 16, 32, 64] {
-        run_family::<u32, BitBlocksSparseTableFamily<B>>(out, dist, min_n, max_n)?;
-    });
-
-    // Block size chosen internally from n
-    run_family::<u32, SparseTableCartesianBlocksFamily>(out, dist, min_n, max_n)?;
-    run_family::<u32, SparseTable3Family>(out, dist, min_n, max_n)?;*/
+    visit_all(&mut SizeSweep { out, dist, min_n, max_n })?;
 
     Ok(())
 }
@@ -511,6 +543,9 @@ enum Command {
     Genome {
         run: String,
     },
+    Rank {
+        run: String
+    }
 }
 
 #[derive(clap::Args)]
@@ -525,16 +560,31 @@ struct MainArgs {
 }
 
 fn main() -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    prefer_performance_cores();
+
     match Cli::parse().command {
         Command::Main(args) => run_main(args),
         Command::Ranges { run } => run_ranges(&run),
         Command::Genome { run } => run_genome(&run),
+        Command::Rank { run } => run_rank(&run),
     }
 }
 
+fn run_rank(run: &str) -> io::Result<()>{
+    let mut out = create_run_file(&format!("{}_random", run))?;
+
+    let n = 10_000_000;
+    let mut rng = get_rng();
+    let data: Vec<u32> = get_random_permutation(&mut rng, n);
+
+    visit_fast(&mut FixedRun { out: &mut out, dist: RangeDistribution::FullyRandom, data: &data })?;
+
+    Ok(())
+}
+
 fn run_main(args: MainArgs) -> std::io::Result<()> {
-    #[cfg(target_os = "macos")]
-    prefer_performance_cores();
+    
 
     // One file per distribution, since the plotting scripts don't distinguish them
     let mut small_out = create_run_file(&format!("{}_small", args.run))?;
@@ -577,34 +627,12 @@ struct RangesResult {
 fn run_ranges(run: &str) -> std::io::Result<()> {
     let mut out = create_run_file(&format!("{run}_ranges"))?;
 
-    // Same families as run_all
-    // Baselines
-    run_ranges_once::<IndexSparseTableFamily>(&mut out)?;
-    run_ranges_once::<OffsetSparseTableFamily>(&mut out)?;
-    run_ranges_once::<RMQTreeFamily>(&mut out)?;
-
-    // Block structures, compared at equal block sizes
-    run_ranges_once::<StridedIndexSparseTableFamily<8>>(&mut out)?;
-    run_ranges_once::<StridedIndexSparseTableFamily<16>>(&mut out)?;
-    run_ranges_once::<StridedIndexSparseTableFamily<32>>(&mut out)?;
-    run_ranges_once::<StridedIndexSparseTableFamily<64>>(&mut out)?;
-    run_ranges_once::<StridedIndexAffixMasksSparseTableFamily<8>>(&mut out)?;
-    run_ranges_once::<StridedIndexAffixMasksSparseTableFamily<16>>(&mut out)?;
-    run_ranges_once::<StridedIndexAffixMasksSparseTableFamily<32>>(&mut out)?;
-    run_ranges_once::<StridedIndexAffixMasksSparseTableFamily<64>>(&mut out)?;
-    run_ranges_once::<BitBlocksSparseTableFamily<8>>(&mut out)?;
-    run_ranges_once::<BitBlocksSparseTableFamily<16>>(&mut out)?;
-    run_ranges_once::<BitBlocksSparseTableFamily<32>>(&mut out)?;
-    run_ranges_once::<BitBlocksSparseTableFamily<64>>(&mut out)?;
-
-    // Block size chosen internally from n
-    run_ranges_once::<SparseTableCartesianBlocksFamily>(&mut out)?;
-    run_ranges_once::<SparseTable3Family>(&mut out)?;
+    visit_all(&mut RangesRun { out: &mut out })?;
 
     Ok(())
 }
 
-fn run_ranges_once<Family: RMQFamily<u32>>(out: &mut BufWriter<File>) -> std::io::Result<()> {
+fn run_ranges_once<Family: RMQFamily<u32>>(out: &mut impl Write) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
     prefer_performance_cores();
 

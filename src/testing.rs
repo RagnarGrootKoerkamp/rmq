@@ -11,19 +11,19 @@ fn get_rng() -> Xoshiro256PlusPlus {
     Xoshiro256PlusPlus::seed_from_u64(42)
 }
 
-fn get_random_permutation(rng: &mut dyn Rng, n: u64) -> Vec<u64> {
-    let mut v: Vec<u64> = (0..n).collect();
+fn get_random_permutation(rng: &mut dyn Rng, n: u32) -> Vec<u32> {
+    let mut v: Vec<u32> = (0..n).collect();
     v.shuffle(rng);
     v
 }
 
 // Drawn with replacement from 0..distinct, so a small `distinct` forces ties.
-fn get_random_with_replace(rng: &mut dyn Rng, n: u64, distinct: u64) -> Vec<u64> {
+fn get_random_with_replace(rng: &mut dyn Rng, n: u32, distinct: u32) -> Vec<u32> {
     (0..n).map(|_| rng.random_range(0..distinct)).collect()
 }
 
 // Compares <= 100 ranges. (If more than 100 possible, these are randomly sampled)
-pub fn compare_with_naive<F: RMQFamily<u64>>(data: &[u64]) {
+pub fn compare_with_naive<F: RMQFamily<u32>>(data: &[u32]) {
     let naive = NaiveRMQ::new(data);
     let test_object = F::Rmq::new(data);
     let n = data.len();
@@ -52,14 +52,14 @@ pub fn compare_with_naive<F: RMQFamily<u64>>(data: &[u64]) {
 }
 
 // Every range of every size up to the exhaustive limit in compare_with_naive.
-pub fn test_small_sizes<F: RMQFamily<u64>>() {
+pub fn test_small_sizes<F: RMQFamily<u32>>() {
     let mut rng = get_rng();
     for n in 1..=13 {
         compare_with_naive::<F>(&get_random_permutation(&mut rng, n));
     }
 }
 
-pub fn test_random_permutations<F: RMQFamily<u64>>() {
+pub fn test_random_permutations<F: RMQFamily<u32>>() {
     let repeats = 10;
     let mut rng = get_rng();
     for _ in 0..repeats {
@@ -68,7 +68,7 @@ pub fn test_random_permutations<F: RMQFamily<u64>>() {
     }
 }
 
-pub fn test_random_with_ties<F: RMQFamily<u64>>() {
+pub fn test_random_with_ties<F: RMQFamily<u32>>() {
     let repeats = 10;
     let mut rng = get_rng();
     for _ in 0..repeats {
@@ -78,18 +78,18 @@ pub fn test_random_with_ties<F: RMQFamily<u64>>() {
 }
 
 // Sizes around power-of-two and block boundaries, with and without heavy ties.
-pub fn test_large_sizes<F: RMQFamily<u64>>() {
+pub fn test_large_sizes<F: RMQFamily<u32>>() {
     let mut rng = get_rng();
     for n in [
         63, 64, 65, 127, 128, 129, 256, 257, 258, 4095, 4096, 4097, 65536, 65537, 65539,
     ] {
-        for distinct in [3, u64::MAX] {
+        for distinct in [3, u32::MAX] {
             compare_with_naive::<F>(&get_random_with_replace(&mut rng, n, distinct));
         }
     }
 }
 
-pub fn test_edge_ranges<F: RMQFamily<u64>>() {
+pub fn test_edge_ranges<F: RMQFamily<u32>>() {
     let data = get_random_permutation(&mut get_rng(), 100);
     let naive = NaiveRMQ::new(&data);
     let test_object = F::Rmq::new(&data);

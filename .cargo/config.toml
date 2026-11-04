@@ -3,3 +3,10 @@ CFLAGS_aarch64_apple_darwin = "-I/opt/homebrew/opt/libomp/include"
 
 [target.'cfg(target_os = "macos")']
 rustflags = ["-L", "/opt/homebrew/opt/libomp/lib"]
+
+# Compile for the local CPU, so the vectorizer can use every SIMD extension it has
+# (e.g. AVX2/AVX-512 on x86). cfg(all()) matches every target; cargo joins the
+# rustflags of all matching [target] sections, so this adds to the one above.
+# build.rs does the same for the C++ libraries. Setting RUSTFLAGS overrides this.
+[target.'cfg(all())']
+rustflags = ["-C", "target-cpu=native"]
