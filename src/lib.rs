@@ -17,10 +17,10 @@ pub use flrmq::FLRMQFamily;
 pub use naive::NaiveRMQFamily;
 pub use rmq_tree::{FanoutRMQTreeFamily, PackedRMQTreeFamily, RMQTreeFamily};
 pub use sparse_table::{
-    CustomOffsetSparseTableFamily, FastValueSparseTableFamily, FanoutValueSparseTableFamily,
-    IndexSparseTableFamily,
-    OffsetSparseTableFamily, OwningOffsetSparseTableFamily, PackedIndexSparseTableFamily,
-    PackedValueSparseTableFamily, PositionOffsetSparseTableFamily, ValueSparseTableFamily,
+    CustomOffsetSparseTableFamily, FanoutValueSparseTableFamily, FastValueSparseTableFamily,
+    IndexSparseTableFamily, OffsetSparseTableFamily, OwningOffsetSparseTableFamily,
+    PackedIndexSparseTableFamily, PackedValueSparseTableFamily, PositionOffsetSparseTableFamily,
+    ValueSparseTableFamily,
 };
 pub use sparse_table_blocks::{
     BitBlocksSparseTableFamily, StridedIndexAffixMasksSparseTableFamily,

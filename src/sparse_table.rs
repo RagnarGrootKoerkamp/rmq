@@ -520,9 +520,9 @@ impl<'a, T: Copy + Into<u32>> RMQ<'a, T> for FastValueSparseTable<'a, T> {
         let base = self.entries.as_ptr();
         for out in answers.chunks_mut(FAST_VST_CHUNK) {
             // Pass 1 for the next chunk: its prefetches overlap this chunk's loads.
-            let next_len = chunks
-                .next()
-                .map_or(0, |chunk| self.prepare_chunk(chunk, &mut next_left, &mut next_right));
+            let next_len = chunks.next().map_or(0, |chunk| {
+                self.prepare_chunk(chunk, &mut next_left, &mut next_right)
+            });
             // Pass 2 for this chunk: loads, prefetched one chunk ago.
             for ((ans, &a), &b) in out.iter_mut().zip(&left[..len]).zip(&right[..len]) {
                 // SAFETY: valid queries give slots inside the table, as in `rmq`.

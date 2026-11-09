@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
-use std::{env, io};
 use std::fs::File;
 use std::hint::black_box;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+use std::{env, io};
 
 use clap::{Parser, Subcommand};
-use needletail::{parse_fastx_file};
 use mem_dbg::{FlatType, MemDbg, MemSize, SizeFlags};
+use needletail::parse_fastx_file;
 use rmq::base::{RMQ, RMQFamily};
 use rmq::bbst::BbSTValue;
 use rmq::sparse_table::OffsetSparseTable;
@@ -139,7 +139,7 @@ struct BenchmarkResult {
     query_time: DistStatistics,
     query_latency: DistStatistics,
     memory_bytes: usize,
-    query_batch_time: Option<DistStatistics>
+    query_batch_time: Option<DistStatistics>,
 }
 
 fn verify_function<T: Copy, R, F, G, V>(
@@ -234,16 +234,21 @@ where
     assert_eq!(repetitions % batch_size, 0);
     let mut warmup_outputs: Vec<usize> = vec![0; warmup_repetitions];
     let warmup_inputs: Vec<T> = (0..warmup_repetitions).map(|_| input_generator()).collect();
-    for (data, output) in warmup_inputs.chunks_exact(batch_size).zip(warmup_outputs.chunks_exact_mut(batch_size)) {
+    for (data, output) in warmup_inputs
+        .chunks_exact(batch_size)
+        .zip(warmup_outputs.chunks_exact_mut(batch_size))
+    {
         f(data, output);
     }
     black_box(&warmup_outputs);
 
-
     let mut outputs: Vec<usize> = vec![0; repetitions];
     let inputs: Vec<T> = (0..repetitions).map(|_| input_generator()).collect();
     let t = Instant::now();
-    for (data, output) in inputs.chunks_exact(batch_size).zip(outputs.chunks_exact_mut(batch_size)) {
+    for (data, output) in inputs
+        .chunks_exact(batch_size)
+        .zip(outputs.chunks_exact_mut(batch_size))
+    {
         f(data, output);
     }
     black_box(&outputs);
@@ -375,7 +380,7 @@ fn run_benchmarks<T: RMQValue, F: RMQFamily<T>>(
         query_time,
         query_latency,
         memory_bytes,
-        query_batch_time: batch_time
+        query_batch_time: batch_time,
     })
 }
 
@@ -467,6 +472,19 @@ fn visit_all<T: RMQValue>(v: &mut impl RMQVisitor<T>) -> io::Result<()> {
     Ok(())
 }
 
+fn visit_compact<T: RMQValue>(v: &mut impl RMQVisitor<T>) -> io::Result<()> {
+    v.visit::<RMQTreeFamily>()?;
+
+    for_each!(B in [8, 16, 32, 64] { v.visit::<StridedIndexSparseTableFamily<B>>()?; });
+    for_each!(B in [8, 16, 32, 64] { v.visit::<StridedIndexAffixMasksSparseTableFamily<B>>()?; });
+    for_each!(B in [8, 16, 32, 64] { v.visit::<BitBlocksSparseTableFamily<B>>()?; });
+
+    v.visit::<SparseTableCartesianBlocksFamily>()?;
+    v.visit::<SparseTable3Family>()?;
+
+    Ok(())
+}
+
 fn visit_fast<T: RMQValue + Into<u32>>(v: &mut impl RMQVisitor<T>) -> io::Result<()> {
     v.visit::<IndexSparseTableFamily>()?;
     v.visit::<PackedIndexSparseTableFamily>()?;
@@ -478,7 +496,23 @@ fn visit_fast<T: RMQValue + Into<u32>>(v: &mut impl RMQVisitor<T>) -> io::Result
     Ok(())
 }
 
-struct SizeSweep<'a, W> { out: &'a mut W, dist: RangeDistribution, min_n: usize, max_n: usize }
+fn visit_bbst_comparison<T: RMQValue + BbSTValue>(v: &mut impl RMQVisitor<T>) -> io::Result<()> {
+    v.visit::<BbSTFamily<9>>()?;
+    v.visit::<BbST2Family<9, 6>>()?;
+    v.visit::<BbST2Family<12, 8>>()?;
+
+    for_each!(B in [32, 64, 128, 256, 512, 1024, 2048, 4096] { v.visit::<StridedIndexSparseTableFamily<B>>()?; });
+    for_each!(B in [32, 64, 128, 256, 512, 1024, 2048, 4096] { v.visit::<StridedIndexAffixMasksSparseTableFamily<B>>()?; });
+
+    Ok(())
+}
+
+struct SizeSweep<'a, W> {
+    out: &'a mut W,
+    dist: RangeDistribution,
+    min_n: usize,
+    max_n: usize,
+}
 
 impl<W: Write> RMQVisitor<u32> for SizeSweep<'_, W> {
     fn visit<F: RMQFamily<u32>>(&mut self) -> std::io::Result<()> {
@@ -486,7 +520,11 @@ impl<W: Write> RMQVisitor<u32> for SizeSweep<'_, W> {
     }
 }
 
-struct FixedRun<'a, W, T> { out: &'a mut W, dist: RangeDistribution, data: &'a [T] }
+struct FixedRun<'a, W, T> {
+    out: &'a mut W,
+    dist: RangeDistribution,
+    data: &'a [T],
+}
 
 impl<W: Write, T: RMQValue> RMQVisitor<T> for FixedRun<'_, W, T> {
     fn visit<F: RMQFamily<T>>(&mut self) -> std::io::Result<()> {
@@ -494,57 +532,15 @@ impl<W: Write, T: RMQValue> RMQVisitor<T> for FixedRun<'_, W, T> {
     }
 }
 
-struct RangesRun<'a, W> { out: &'a mut W }
+struct RangesRun<'a, W> {
+    out: &'a mut W,
+    n: usize,
+}
 
 impl<W: Write> RMQVisitor<u32> for RangesRun<'_, W> {
     fn visit<F: RMQFamily<u32>>(&mut self) -> std::io::Result<()> {
-        run_ranges_once::<F>(self.out)
+        run_ranges_once::<F>(self.out, self.n)
     }
-}
-
-fn run_all(
-    out: &mut impl Write,
-    dist: RangeDistribution,
-    min_n: usize,
-    max_n: usize,
-) -> std::io::Result<()> {
-    visit_all(&mut SizeSweep { out, dist, min_n, max_n })?;
-
-    Ok(())
-}
-
-fn run_all_genome<T>(
-    out: &mut impl Write,
-    dist: RangeDistribution,
-    genome_lcp: &[T],
-) -> std::io::Result<()>
-where
-    T: RMQValue + BbSTValue,
-{
-    // Baselines
-    //run_family_on_genome::<T, OffsetSparseTableFamily>(out, dist, genome_lcp)?;
-    //run_family_on_genome::<T, RMQTreeFamily>(out, dist, genome_lcp)?;
-
-    // Block structures, compared at equal block sizes
-    for_each!(B in [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096] {
-        run_family_on_genome::<T, StridedIndexSparseTableFamily<B>>(out, dist, genome_lcp)?;
-    });
-    for_each!(B in [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096] {
-        run_family_on_genome::<T, StridedIndexAffixMasksSparseTableFamily<B>>(out, dist, genome_lcp)?;
-    });
-    // for_each!(B in [8, 16, 32, 64] {
-    //     run_family_on_genome::<T, BitBlocksSparseTableFamily<B>>(out, dist, genome_lcp)?;
-    // });
-
-    // Block size chosen internally from n
-    //run_family_on_genome::<T, SparseTableCartesianBlocksFamily>(out, dist, genome_lcp)?;
-    //run_family_on_genome::<T, SparseTable3Family>(out, dist, genome_lcp)?;
-
-    run_family_on_genome::<T, BbSTFamily<9>>(out, dist, genome_lcp)?;
-    run_family_on_genome::<T, BbST2Family<9, 6>>(out, dist, genome_lcp)?;
-    run_family_on_genome::<T, BbST2Family<12, 8>>(out, dist, genome_lcp)?;
-
-    Ok(())
 }
 
 /// Accepts plain integers or scientific notation, e.g. `1e7`.
@@ -593,13 +589,15 @@ enum Command {
     /// Benchmark every family at n = 1e7 over range sizes 2^1 up to 2^24
     Ranges {
         run: String,
+        n: usize,
     },
     Genome {
+        #[arg(long, default_value = "1e7", value_parser = parse_size)]
         run: String,
     },
     Rank {
-        run: String
-    }
+        run: String,
+    },
 }
 
 #[derive(clap::Args)]
@@ -619,86 +617,87 @@ fn main() -> std::io::Result<()> {
 
     match Cli::parse().command {
         Command::Main(args) => run_main(args),
-        Command::Ranges { run } => run_ranges(&run),
+        Command::Ranges { run, n } => run_ranges(&run, n),
         Command::Genome { run } => run_genome(&run),
         Command::Rank { run } => run_rank(&run),
     }
 }
 
-fn run_rank(run: &str) -> io::Result<()>{
+fn run_rank(run: &str) -> io::Result<()> {
     let mut out = create_run_file(&format!("{}_random", run))?;
 
     let n = 10_000_000;
     let mut rng = get_rng();
     let data: Vec<u32> = get_random_permutation(&mut rng, n);
 
-    visit_fast(&mut FixedRun { out: &mut out, dist: RangeDistribution::FullyRandom, data: &data })?;
+    visit_fast(&mut FixedRun {
+        out: &mut out,
+        dist: RangeDistribution::FullyRandom,
+        data: &data,
+    })?;
 
     Ok(())
 }
 
 fn run_main(args: MainArgs) -> std::io::Result<()> {
-    
-
     // One file per distribution, since the plotting scripts don't distinguish them
     let mut small_out = create_run_file(&format!("{}_small", args.run))?;
     let mut random_out = create_run_file(&format!("{}_random", args.run))?;
     let mut log_uniform_out = create_run_file(&format!("{}_loguniform", args.run))?;
 
-    run_all(
-        &mut small_out,
-        RangeDistribution::Small,
-        args.min_n,
-        args.max_n,
-    )?;
-    run_all(
-        &mut random_out,
-        RangeDistribution::FullyRandom,
-        args.min_n,
-        args.max_n,
-    )?;
-    run_all(
-        &mut log_uniform_out,
-        RangeDistribution::LogUniform,
-        args.min_n,
-        args.max_n,
-    )?;
+    visit_all(&mut SizeSweep {
+        out: &mut small_out,
+        dist: RangeDistribution::Small,
+        min_n: args.min_n,
+        max_n: args.max_n,
+    })?;
+    visit_all(&mut SizeSweep {
+        out: &mut random_out,
+        dist: RangeDistribution::FullyRandom,
+        min_n: args.min_n,
+        max_n: args.max_n,
+    })?;
+    visit_all(&mut SizeSweep {
+        out: &mut log_uniform_out,
+        dist: RangeDistribution::LogUniform,
+        min_n: args.min_n,
+        max_n: args.max_n,
+    })?;
 
     Ok(())
 }
 
-/// `BenchmarkResult` without build time and memory, which don't depend on the range size.
+/// `BenchmarkResult` without build time, which doesn't depend on the range size.
 #[derive(Debug, Serialize)]
 struct RangesResult {
     name: &'static str,
     params: BTreeMap<&'static str, usize>,
     distribution: String,
     n: usize,
+    memory_bytes: usize,
     query_time: DistStatistics,
     query_latency: DistStatistics,
 }
 
-fn run_ranges(run: &str) -> std::io::Result<()> {
+fn run_ranges(run: &str, n: usize) -> std::io::Result<()> {
     let mut out = create_run_file(&format!("{run}_ranges"))?;
 
-    visit_all(&mut RangesRun { out: &mut out })?;
+    visit_bbst_comparison(&mut RangesRun { out: &mut out, n })?;
 
     Ok(())
 }
 
-fn run_ranges_once<Family: RMQFamily<u32>>(out: &mut impl Write) -> std::io::Result<()> {
+fn run_ranges_once<Family: RMQFamily<u32>>(out: &mut impl Write, n: usize) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
     prefer_performance_cores();
-
-    let n = 10_000_000;
 
     // Built once and shared by every range size, since building doesn't depend on the ranges
     let data: Vec<u32> = get_random_permutation(&mut get_rng(), n);
     let rmq = <Family as RMQFamily<u32>>::Rmq::new(&data);
+    let memory_bytes = rmq.mem_size(SizeFlags::default());
 
-    // 2^24 is the largest B with 2^(B-1) < n. No verification: the reference is the
-    // benchmarked structure itself.
-    for b in 1..=24 {
+    let b_max = (n - 1).ilog2() + 1;
+    for b in 1..=b_max {
         let dist = RangeDistribution::PowerOfTwo(b);
         let (query_time, query_latency, _) = time_queries(&rmq, dist, n);
         let res = RangesResult {
@@ -706,8 +705,9 @@ fn run_ranges_once<Family: RMQFamily<u32>>(out: &mut impl Write) -> std::io::Res
             params: <Family as RMQFamily<u32>>::PARAMS.iter().copied().collect(),
             distribution: dist.name(),
             n,
+            memory_bytes,
             query_time,
-            query_latency
+            query_latency,
         };
         serde_json::to_writer(&mut *out, &res)?;
         out.write_all(b"\n")?;
@@ -736,9 +736,21 @@ fn run_genome(run: &str) -> std::io::Result<()> {
     let mut random_out = create_run_file(&format!("{}_random", run))?;
     let mut log_uniform_out = create_run_file(&format!("{}_loguniform", run))?;
 
-    run_all_genome(&mut small_out, RangeDistribution::Small, &lcp)?;
-    run_all_genome(&mut random_out, RangeDistribution::FullyRandom, &lcp)?;
-    run_all_genome(&mut log_uniform_out, RangeDistribution::LogUniform, &lcp)?;
+    visit_compact(&mut FixedRun {
+        out: &mut small_out,
+        dist: RangeDistribution::Small,
+        data: &lcp,
+    })?;
+    visit_compact(&mut FixedRun {
+        out: &mut random_out,
+        dist: RangeDistribution::FullyRandom,
+        data: &lcp,
+    })?;
+    visit_compact(&mut FixedRun {
+        out: &mut log_uniform_out,
+        dist: RangeDistribution::LogUniform,
+        data: &lcp,
+    })?;
 
     Ok(())
 }

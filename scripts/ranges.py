@@ -3,10 +3,10 @@
 # dependencies = ["plotly"]
 # ///
 # AI Generated
-"""Bar plot of query time or query latency against range size, from the output of
+"""Line plot of query time or query latency against range size, from the output of
 `cargo run --release -- ranges <run>` (one line per structure and range size 2^B). Each structure
-(name + params) gets its own bar in every group, so table variants can be compared side by side.
-Hover a bar for its exact numbers; click a legend entry to hide a structure.
+(name + params) gets its own line, so table variants can be compared side by side.
+Hover a point for its exact numbers and the structure's size in bits per element; click a legend entry to hide a structure.
 
     uv run scripts/ranges.py abc_ranges                   # query time
     uv run scripts/ranges.py abc_ranges --metric latency --stat median
@@ -15,7 +15,7 @@ Hover a bar for its exact numbers; click a legend entry to hide a structure.
     uv run scripts/ranges.py abc_ranges --weigh           # contribution to a random query
 
 With --weigh, each band B is multiplied by the share of fully random queries (l <= r uniform)
-with r - l in band B, so the bars of a structure sum to its expected fully random query cost.
+with r - l in band B, so the points of a structure sum to its expected fully random query cost.
 """
 
 import argparse
@@ -60,6 +60,8 @@ def band_weight(b, n):
 
 # label -> {B: (value, std_dev)}, values in ns, with B parsed from the distribution name "2^B"
 series = defaultdict(dict)
+# label -> bits per element, absent for runs from before memory_bytes was recorded
+bits_per_elem = {}
 ns = set()
 multi_file = len(args.files) > 1
 for path in args.files:
@@ -75,6 +77,8 @@ for path in args.files:
             weight = band_weight(b, r["n"]) if args.weigh else 1
             series[label][b] = (r[key][args.stat] * 1e9 * weight, r[key]["std_dev"] * 1e9 * weight)
             ns.add(r["n"])
+            if "memory_bytes" in r:
+                bits_per_elem[label] = r["memory_bytes"] * 8 / r["n"]
 
 if not series:
     parser.error("no results match")
@@ -96,13 +100,16 @@ fig = go.Figure()
 for i, label in enumerate(labels):
     points = series[label]
     present = [b for b in bs if b in points]
+    size = f"{bits_per_elem[label]:.3g} bits/elem" if label in bits_per_elem else "size unknown"
     fig.add_trace(
-        go.Bar(
-            x=present, y=[points[b][0] for b in present], name=label, marker_color=color(i),
-            error_y=dict(array=[points[b][1] for b in present], color="#808080", thickness=1, width=0),
+        go.Scatter(
+            x=present, y=[points[b][0] for b in present], name=label, mode="lines+markers",
+            line=dict(color=color(i), width=2), marker=dict(size=6),
+            error_y=dict(array=[points[b][1] for b in present], color=color(i), thickness=1, width=3),
             customdata=[(b - 1, points[b][1]) for b in present],
             hovertemplate=(
                 f"<b>{label}</b><br>"
+                f"size: {size}<br>"
                 "r - l ∈ [2<sup>%{customdata[0]}</sup>, 2<sup>%{x}</sup>)<br>"
                 f"{args.stat}: %{{y:.3g}} ns<br>"
                 "std dev: %{customdata[1]:.3g} ns<extra></extra>"
@@ -122,7 +129,7 @@ fig.update_yaxes(
 )
 fig.update_layout(
     template="plotly_white", width=1400, height=600, title_text=f"{title}{', weighted by random query share' if args.weigh else ''}, n = {n_label}",
-    barmode="group", bargap=0.2, bargroupgap=0.1,  # bargroupgap leaves a gap between neighbours
+    hovermode="closest",
     showlegend=len(labels) > 1,
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
     margin=dict(t=110),

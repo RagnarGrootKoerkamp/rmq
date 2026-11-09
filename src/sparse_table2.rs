@@ -111,7 +111,7 @@ impl<'a, T: Ord + Copy> RMQ<'a, T> for SparseTableCartesianBlocks<'a, T> {
             inner.in_block(l_block, l % inner.b, r % inner.b)
         } else {
             let oquery_block_res = self.block_sparse_table.rmq(l_block, r_block);
-            let oquery_ans = inner.in_block(oquery_block_res, 0, inner.b-1);
+            let oquery_ans = inner.in_block(oquery_block_res, 0, inner.b - 1);
             if oquery_ans >= l && oquery_ans <= r {
                 return oquery_ans;
             }
