@@ -454,7 +454,7 @@ trait RMQVisitor<T: RMQValue> {
     fn visit<F: RMQFamily<T>>(&mut self) -> io::Result<()>;
 }
 
-fn visit_all<T: RMQValue>(v: &mut impl RMQVisitor<T>) -> io::Result<()> {
+fn visit_all<T: RMQValue + Into<u32>>(v: &mut impl RMQVisitor<T>) -> io::Result<()> {
     v.visit::<IndexSparseTableFamily>()?;
     v.visit::<PackedIndexSparseTableFamily>()?;
 
@@ -472,7 +472,7 @@ fn visit_all<T: RMQValue>(v: &mut impl RMQVisitor<T>) -> io::Result<()> {
     Ok(())
 }
 
-fn visit_compact<T: RMQValue>(v: &mut impl RMQVisitor<T>) -> io::Result<()> {
+fn visit_compact<T: RMQValue + Into<u32>>(v: &mut impl RMQVisitor<T>) -> io::Result<()> {
     v.visit::<RMQTreeFamily>()?;
 
     for_each!(B in [8, 16, 32, 64] { v.visit::<StridedIndexSparseTableFamily<B>>()?; });
@@ -496,13 +496,15 @@ fn visit_fast<T: RMQValue + Into<u32>>(v: &mut impl RMQVisitor<T>) -> io::Result
     Ok(())
 }
 
-fn visit_bbst_comparison<T: RMQValue + BbSTValue>(v: &mut impl RMQVisitor<T>) -> io::Result<()> {
+fn visit_bbst_comparison<T: RMQValue + BbSTValue + Into<u32>>(v: &mut impl RMQVisitor<T>) -> io::Result<()> {
     v.visit::<BbSTFamily<9>>()?;
     v.visit::<BbST2Family<9, 6>>()?;
     v.visit::<BbST2Family<12, 8>>()?;
 
-    for_each!(B in [32, 64, 128, 256, 512, 1024, 2048, 4096] { v.visit::<StridedIndexSparseTableFamily<B>>()?; });
-    for_each!(B in [32, 64, 128, 256, 512, 1024, 2048, 4096] { v.visit::<StridedIndexAffixMasksSparseTableFamily<B>>()?; });
+    for_each!(B in [32, 512, 4096] { v.visit::<StridedIndexSparseTableFamily<B>>()?; });
+
+    //for_each!(B in [32, 64, 128, 256, 512, 1024, 2048, 4096] { v.visit::<StridedIndexSparseTableFamily<B>>()?; });
+    //for_each!(B in [32, 64, 128, 256, 512, 1024, 2048, 4096] { v.visit::<StridedIndexAffixMasksSparseTableFamily<B>>()?; });
 
     Ok(())
 }

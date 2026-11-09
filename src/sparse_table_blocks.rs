@@ -5,17 +5,16 @@ use sux::{
 };
 
 use crate::{
-    base::{RMQ, TwoArgMin},
-    sparse_table::{IndexST, OwningOffsetSparseTable},
+    base::{RMQ, TwoArgMin}, sparse_table::{IndexST, OwningOffsetSparseTable, ValueSparseTable},
 };
 
 #[derive(MemSize, MemDbg)]
 pub struct StridedIndexSparseTable<'a, T, const B: usize> {
     data: &'a [T],
-    sparse_table: OwningOffsetSparseTable<'a, T>,
+    sparse_table: ValueSparseTable<'a, T>,
 }
 
-impl<'a, T: Ord + Copy, const B: usize> RMQ<'a, T> for StridedIndexSparseTable<'a, T, B> {
+impl<'a, T: Ord + Copy + Into<u32>, const B: usize> RMQ<'a, T> for StridedIndexSparseTable<'a, T, B> {
     fn new(data: &'a [T]) -> Self
     where
         Self: Sized,
@@ -33,7 +32,7 @@ impl<'a, T: Ord + Copy, const B: usize> RMQ<'a, T> for StridedIndexSparseTable<'
 
         Self {
             data,
-            sparse_table: OwningOffsetSparseTable::new(data, &indices),
+            sparse_table: ValueSparseTable::new(data, &indices),
         }
     }
 
@@ -76,7 +75,7 @@ impl<'a, T: Ord, const B: usize> StridedIndexSparseTable<'a, T, B> {
 }
 
 crate::rmq_family! {
-    pub StridedIndexSparseTableFamily<const B: usize> => StridedIndexSparseTable where T: Ord + Copy
+    pub StridedIndexSparseTableFamily<const B: usize> => StridedIndexSparseTable where T: Ord + Copy + Into<u32>
 }
 
 #[derive(MemSize, MemDbg)]

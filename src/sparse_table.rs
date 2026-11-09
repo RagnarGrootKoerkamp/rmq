@@ -364,7 +364,7 @@ impl<'a, T: Copy + Into<u32>> ValueSparseTable<'a, T> {
         };
 
         for i in 0..n {
-            table.entries[i] = (data[indices[i]].into() as u64) << 32 | (i as u64);
+            table.entries[i] = (data[indices[i]].into() as u64) << 32 | (indices[i] as u64);
         }
         for k in 1..=table.k_max {
             for i in 0..table.n + 1 - (1 << k) {
