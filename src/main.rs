@@ -516,6 +516,14 @@ struct SizeSweep<'a, W> {
 
 impl<W: Write> RMQVisitor<u32> for SizeSweep<'_, W> {
     fn visit<F: RMQFamily<u32>>(&mut self) -> std::io::Result<()> {
+        eprintln!(
+            "SizeSweep::<{}, {}>({:?}, n=[{}, {}])",
+            std::any::type_name::<u32>(),
+            std::any::type_name::<F>(),
+            self.dist,
+            self.min_n,
+            self.max_n
+        );
         run_family::<u32, F>(self.out, self.dist, self.min_n, self.max_n)
     }
 }
@@ -528,6 +536,13 @@ struct FixedRun<'a, W, T> {
 
 impl<W: Write, T: RMQValue> RMQVisitor<T> for FixedRun<'_, W, T> {
     fn visit<F: RMQFamily<T>>(&mut self) -> std::io::Result<()> {
+        eprintln!(
+            "FixedRun::<{}, {}>({:?}, n={})",
+            std::any::type_name::<T>(),
+            std::any::type_name::<F>(),
+            self.dist,
+            self.data.len()
+        );
         run_family_on_genome::<T, F>(self.out, self.dist, self.data)
     }
 }
@@ -539,6 +554,12 @@ struct RangesRun<'a, W> {
 
 impl<W: Write> RMQVisitor<u32> for RangesRun<'_, W> {
     fn visit<F: RMQFamily<u32>>(&mut self) -> std::io::Result<()> {
+        eprintln!(
+            "RangesRun::<{}, {}>(n={})",
+            std::any::type_name::<u32>(),
+            std::any::type_name::<F>(),
+            self.n
+        );
         run_ranges_once::<F>(self.out, self.n)
     }
 }
