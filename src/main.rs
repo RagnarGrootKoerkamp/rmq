@@ -589,10 +589,10 @@ enum Command {
     /// Benchmark every family at n = 1e7 over range sizes 2^1 up to 2^24
     Ranges {
         run: String,
+        #[arg(long, default_value = "1e7", value_parser = parse_size)]
         n: usize,
     },
     Genome {
-        #[arg(long, default_value = "1e7", value_parser = parse_size)]
         run: String,
     },
     Rank {
