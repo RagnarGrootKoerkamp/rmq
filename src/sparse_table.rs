@@ -698,6 +698,9 @@ impl<'a, V: Copy, R: RMQ<'a, V>> RMQ<'a, V> for OwningRMQWrapper<'a, V, R> {
     }
 
     fn rmq(&self, l: usize, r: usize) -> usize {
+        if l==r {
+            return self.position(l);
+        }
         self.position(self.inner.rmq(l, r))
     }
 }

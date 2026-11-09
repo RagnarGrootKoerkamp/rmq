@@ -220,6 +220,8 @@ pub struct StridedIndexMinHeapSparseTable<'a, T, const B: usize> {
     sparse_table: OwningOffsetSparseTable<'a, T>,
     // One 2B-bit cartesian tree identifier per block
     block_ids: BitFieldVec,
+    // Bit i set iff data[i] is a prefix or suffix minimum of its block
+    affix_bits: Box<[u64]>,
 }
 
 impl<'a, T: Ord + Copy, const B: usize> RMQ<'a, T> for StridedIndexMinHeapSparseTable<'a, T, B> {
@@ -231,19 +233,52 @@ impl<'a, T: Ord + Copy, const B: usize> RMQ<'a, T> for StridedIndexMinHeapSparse
 
         let n = data.len();
         let mut indices: Vec<usize> = vec![];
+        let mut affix_bits = vec![0u64; n.div_ceil(64)].into_boxed_slice();
+        let mut set = |i: usize| affix_bits[i / 64] |= 1 << (i % 64);
+
+        for i in (0..n).step_by(B) {
+            let end = (i + B).min(n);
+
+            let mut idx = i;
+            for j in i + 1..end {
+                idx = data.argmin(idx, j);
+            }
+            indices.push(idx);
+
+            // Decreasing sequence from start to smallest
+            let mut last = i;
+            set(i);
+            for j in i + 1..=idx {
+                if data[j] < data[last] {
+                    last = j;
+                    set(j);
+                }
+            }
+
+            // Decreasing sequence from end to smallest
+            let mut last = end - 1;
+            set(end - 1);
+            for j in (idx..end - 1).rev() {
+                if data[j] <= data[last] {
+                    last = j;
+                    set(j);
+                }
+            }
+        }
+
         let mut block_ids = BitFieldVec::new(2 * B, n.div_ceil(B));
 
         for i in (0..n).step_by(B) {
             let end = (i + B).min(n);
             let id = crate::cartesian_tree::convert_to_minheap(&data[i..end], B);
             block_ids.set_value(i / B, id as usize);
-            indices.push(i + crate::cartesian_tree::rmq_on_minheap(id, B, 0, end - 1 - i));
         }
 
         Self {
             data,
             sparse_table: OwningOffsetSparseTable::new(data, &indices),
             block_ids,
+            affix_bits
         }
     }
 
@@ -259,8 +294,8 @@ impl<'a, T: Ord + Copy, const B: usize> RMQ<'a, T> for StridedIndexMinHeapSparse
         let over_sample_result = self.sparse_table.rmq(lblock, rblock);
 
         if over_sample_result < l || over_sample_result > r {
-            let left_in_block = self.in_block(lblock, l - lblock * B, B - 1);
-            let right_in_block = self.in_block(rblock, 0, r - rblock * B);
+            let left_in_block = self.suffix_min(l);
+            let right_in_block = self.prefix_min(r);
 
             if lblock + 1 == rblock {
                 self.data.argmin(left_in_block, right_in_block)
@@ -275,12 +310,49 @@ impl<'a, T: Ord + Copy, const B: usize> RMQ<'a, T> for StridedIndexMinHeapSparse
     }
 }
 
-impl<'a, T, const B: usize> StridedIndexMinHeapSparseTable<'a, T, B> {
+impl<'a, T: Ord + Copy, const B: usize> StridedIndexMinHeapSparseTable<'a, T, B> {
     // Leftmost minimum of block[l..=r], with l and r relative to the block start
     #[inline]
     fn in_block(&self, block: usize, l: usize, r: usize) -> usize {
         let id = unsafe { self.block_ids.get_value_unchecked(block) } as u64;
         block * B + crate::cartesian_tree::rmq_on_minheap(id, B, l, r)
+    }
+
+    #[inline]
+    fn affix_word(&self, w: usize) -> u64 {
+        unsafe { *self.affix_bits.get_unchecked(w) }
+    }
+
+    // Leftmost minimum of [start of r's block, r]
+    #[inline]
+    fn prefix_min(&self, r: usize) -> usize {
+        let block = r / B;
+        // Bits up to the block min are prefix minima; past it the answer is the block min
+        let p = r.min(self.sparse_table.rmq(block, block));
+        // The block start bit is always set, so the scan stops inside the block
+        let mut w = p / 64;
+        let mut word = self.affix_word(w) & (u64::MAX >> (63 - p % 64));
+        while word == 0 {
+            w -= 1;
+            word = self.affix_word(w);
+        }
+        w * 64 + word.ilog2() as usize
+    }
+
+    // Leftmost minimum of [l, end of l's block]
+    #[inline]
+    fn suffix_min(&self, l: usize) -> usize {
+        let block = l / B;
+        // Bits from the block min on are suffix minima; before it the answer is the block min
+        let p = l.max(self.sparse_table.rmq(block, block));
+        // The block end bit is always set, so the scan stops inside the block
+        let mut w = p / 64;
+        let mut word = self.affix_word(w) & (u64::MAX << (p % 64));
+        while word == 0 {
+            w += 1;
+            word = self.affix_word(w);
+        }
+        w * 64 + word.trailing_zeros() as usize
     }
 }
 
