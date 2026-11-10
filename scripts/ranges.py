@@ -34,6 +34,10 @@ METRICS = {
     "time": ("query_time", "Query time (independent queries)"),
     "latency": ("query_latency", "Query latency (dependent chain)"),
 }
+# Structures whose label contains one of these are drawn grey, dashed and with hollow markers
+HIGHLIGHT = {"BbST"}
+# Dark starting greys, one per highlighted structure, so their lightened variants stay visible
+GREYS = ["#303030", "#6e6e6e", "#4f4f4f", "#8c8c8c"]
 
 parser = argparse.ArgumentParser()
 parser.add_argument("files", nargs="+")
@@ -62,19 +66,23 @@ def band_weight(b, n):
 series = defaultdict(dict)
 # label -> bits per element, absent for runs from before memory_bytes was recorded
 bits_per_elem = {}
+# label -> structure name without params or run, so all variants of a structure share a color family
+structure = {}
 ns = set()
 multi_file = len(args.files) > 1
 for path in args.files:
     with open(path) as f:
         for line in f:
             r = json.loads(line)
-            label = r["name"].rsplit("::", 1)[-1].removesuffix("Family") + params_label(r.get("params", {}))
+            name = r["name"].rsplit("::", 1)[-1].removesuffix("Family")
+            label = name + params_label(r.get("params", {}))
             if args.names and not any(s in label for s in args.names):
                 continue
             if multi_file:
                 label += f" ({Path(path).stem})"
             b = int(r["distribution"].removeprefix("2^"))
             weight = band_weight(b, r["n"]) if args.weigh else 1
+            structure[label] = name
             series[label][b] = (r[key][args.stat] * 1e9 * weight, r[key]["std_dev"] * 1e9 * weight)
             ns.add(r["n"])
             if "memory_bytes" in r:
@@ -93,19 +101,45 @@ def color(i):
     return "#{:02x}{:02x}{:02x}".format(*(round(c * 255) for c in colorsys.hls_to_rgb(h, l, s)))
 
 
+def towards_white(hex_color, t):
+    """Mix hex_color with white, t = 0 keeps it, t = 1 is white."""
+    rgb = [int(hex_color[k : k + 2], 16) for k in (1, 3, 5)]
+    return "#{:02x}{:02x}{:02x}".format(*(round(c + (255 - c) * t) for c in rgb))
+
+
 labels = list(series)  # file order, so a structure keeps its color across --names filters of the same file
+# Each structure gets a base color (grey if highlighted), its variants fade from it towards white
+variants = defaultdict(list)
+for label in labels:
+    variants[structure[label]].append(label)
+base_color = {}
+n_colored = n_grey = 0
+for name in variants:
+    if any(s in name for s in HIGHLIGHT):
+        base_color[name] = GREYS[n_grey % len(GREYS)]
+        n_grey += 1
+    else:
+        base_color[name] = color(n_colored)
+        n_colored += 1
+trace_color = {}
+for name, group in variants.items():
+    for j, label in enumerate(group):
+        trace_color[label] = towards_white(base_color[name], 0.6 * j / max(len(group) - 1, 1))
 bs = sorted({b for points in series.values() for b in points})
 
 fig = go.Figure()
-for i, label in enumerate(labels):
+for label in labels:
     points = series[label]
     present = [b for b in bs if b in points]
     size = f"{bits_per_elem[label]:.3g} bits/elem" if label in bits_per_elem else "size unknown"
+    marked = any(s in structure[label] for s in HIGHLIGHT)
+    c = trace_color[label]
     fig.add_trace(
         go.Scatter(
             x=present, y=[points[b][0] for b in present], name=label, mode="lines+markers",
-            line=dict(color=color(i), width=2), marker=dict(size=6),
-            error_y=dict(array=[points[b][1] for b in present], color=color(i), thickness=1, width=3),
+            line=dict(color=c, width=2, dash="dash" if marked else "solid"),
+            marker=dict(size=6, symbol="circle-open" if marked else "circle"),
+            error_y=dict(array=[points[b][1] for b in present], color=c, thickness=1, width=3),
             customdata=[(b - 1, points[b][1]) for b in present],
             hovertemplate=(
                 f"<b>{label}</b><br>"
