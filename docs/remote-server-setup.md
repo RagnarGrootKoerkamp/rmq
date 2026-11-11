@@ -76,7 +76,7 @@ and pins the benchmark to one core. Compute nodes often have no internet access,
 network-dependent steps on the login node and submit from the repo root:
 
 ```sh
-scripts/fetch_deps.sh && cargo build --release   # the job runs cargo offline
+scripts/fetch_deps.sh && cargo fetch             # the job builds offline on the compute node
 scripts/fetch_genome.sh                          # only for `genome`
 sbatch scripts/run_and_publish.sbatch sweep main
 sbatch -p <partition> -t 2-00:00:00 scripts/run_and_publish.sbatch big main --min-n 1e8 --max-n 1e8
@@ -84,7 +84,10 @@ squeue --me; tail -f slurm-rmq-bench-<jobid>.out
 ```
 
 Set the partition, account and node constraint on the `sbatch` command line, or uncomment the
-`##SBATCH` lines in the script. `<host>` in the run name is the compute node's name. If compute
+`##SBATCH` lines in the script. `<host>` in the run name is the compute node's name. The job
+builds on the compute node into `target/node-<host>`, so `-C target-cpu=native` (and
+`-march=native` for the C++ libraries) targets that node's CPU; a build on the login node would
+be reused unchanged and tuned for the wrong CPU. If compute
 nodes can't reach GitHub, the push fails and the run stays committed in `runs/`; push it from
 the login node as described below.
 

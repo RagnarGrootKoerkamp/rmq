@@ -7,9 +7,11 @@
 #     sbatch scripts/run_and_publish.sbatch <label> genome
 #
 # Override any #SBATCH line on the command line, e.g. `sbatch -p bench -t 2-00:00:00 ...`.
-# Build (and for genome, scripts/fetch_genome.sh) on the login node first: the job runs cargo
-# offline, since compute nodes often have no internet access. The log goes to
-# slurm-rmq-bench-<jobid>.out in the submit dir.
+# Fetch dependencies on the login node first (scripts/fetch_deps.sh && cargo fetch, plus
+# scripts/fetch_genome.sh for genome): the job runs cargo offline, since compute nodes often have
+# no internet access. The job builds on the compute node itself, because target-cpu=native and
+# -march=native must resolve to the node's CPU, not the login node's. Each node gets its own
+# target dir (target/node-<host>). The log goes to slurm-rmq-bench-<jobid>.out in the submit dir.
 #
 # The benchmark is single-threaded and measures latency, so the job takes a whole node and pins
 # the process to one core. `genome` is left unpinned so suffix-array construction can use every
@@ -40,6 +42,11 @@ fi
 export CARGO_NET_OFFLINE=true
 export OMP_NUM_THREADS="${SLURM_CPUS_ON_NODE:-$(nproc)}"
 export IGNORE_MEM_THRESHOLD=1
+
+# Cargo fingerprints the flag text "target-cpu=native", not the CPU it resolves to, so a binary
+# built elsewhere would be reused as is. A per-node target dir forces a build for this CPU.
+export CARGO_TARGET_DIR="$CODE/target/node-$(hostname -s)"
+cargo build --release
 
 echo "job $SLURM_JOB_ID on $(hostname -s), $(date -Is)"
 echo "code $(git rev-parse --short HEAD)$(git diff --quiet || echo '-dirty'), args: $*"
