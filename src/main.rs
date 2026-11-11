@@ -497,12 +497,12 @@ fn visit_fast<T: RMQValue + Into<u32>>(v: &mut impl RMQVisitor<T>) -> io::Result
 }
 
 fn visit_bbst_comparison<T: RMQValue + BbSTValue>(v: &mut impl RMQVisitor<T>) -> io::Result<()> {
-    v.visit::<BbSTFamily<9>>()?;
-    v.visit::<BbST2Family<9, 6>>()?;
-    v.visit::<BbST2Family<12, 8>>()?;
+    //v.visit::<BbSTFamily<9>>()?;
+    //v.visit::<BbST2Family<9, 6>>()?;
+    //v.visit::<BbST2Family<12, 8>>()?;
 
-    for_each!(B in [64, 512, 4096] { v.visit::<StridedIndexSparseTableFamily<B>>()?; });
-    for_each!(B in [32, 64, 512, 4096] { v.visit::<StridedIndexAffixMasksSparseTableFamily<B>>()?; });
+    //for_each!(B in [64, 512, 4096] { v.visit::<StridedIndexSparseTableFamily<B>>()?; });
+    //for_each!(B in [32, 64, 512, 4096] { v.visit::<StridedIndexAffixMasksSparseTableFamily<B>>()?; });
     v.visit::<StridedIndexMinHeapSparseTableFamily<32>>()?;
 
     Ok(())

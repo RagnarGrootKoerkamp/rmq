@@ -313,6 +313,13 @@ impl<'a, T: Ord + Copy, const B: usize> RMQ<'a, T> for StridedIndexMinHeapSparse
 impl<'a, T: Ord + Copy, const B: usize> StridedIndexMinHeapSparseTable<'a, T, B> {
     // Leftmost minimum of block[l..=r], with l and r relative to the block start
     #[inline]
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse4.1", target_feature = "bmi2"))]
+    fn in_block(&self, block: usize, l: usize, r: usize) -> usize {
+        let id = unsafe { self.block_ids.get_value_unchecked(block) } as u64;
+        block * B + crate::cartesian_tree::fast::rmq_on_minheap(id, B, l, r)
+    }
+    #[inline]
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse4.1", target_feature = "bmi2")))]
     fn in_block(&self, block: usize, l: usize, r: usize) -> usize {
         let id = unsafe { self.block_ids.get_value_unchecked(block) } as u64;
         block * B + crate::cartesian_tree::rmq_on_minheap(id, B, l, r)
