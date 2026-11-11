@@ -46,6 +46,16 @@ export IGNORE_MEM_THRESHOLD=1
 # Cargo fingerprints the flag text "target-cpu=native", not the CPU it resolves to, so a binary
 # built elsewhere would be reused as is. A per-node target dir forces a build for this CPU.
 export CARGO_TARGET_DIR="$CODE/target/node-$(hostname -s)"
+
+# Log what target-cpu=native resolves to here, and which cfg-gated paths that enables.
+feats=$(rustc -C target-cpu=native --print cfg | sed -n 's/^target_feature="\(.*\)"$/\1/p')
+has() { grep -qx "$1" <<< "$feats"; }
+native=$(rustc --print target-cpus | sed -n 's/.*native.*(currently \([^)]*\)).*/\1/p')
+echo "build cpu: $(grep -m1 'model name' /proc/cpuinfo | sed 's/.*: //') (target-cpu=native -> ${native:-?})"
+if has sse4.1 && has bmi2; then inblock=fast; else inblock=fallback; fi
+if has avx512f; then avx512=yes; else avx512=no; fi
+echo "build features: in_block=$inblock rmq_on_minheap, avx2=$(has avx2 && echo yes || echo no), avx512=$avx512"
+echo "build target dir: $CARGO_TARGET_DIR"
 cargo build --release
 
 echo "job $SLURM_JOB_ID on $(hostname -s), $(date -Is)"
