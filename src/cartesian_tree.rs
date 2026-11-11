@@ -45,7 +45,7 @@ pub fn rmq_on_minheap(id: u64, width: usize, l: usize, r: usize) -> usize {
 // region: rmq_on_minheap using nibble groups (Fable)
 
 #[cfg(all(target_arch = "x86_64", target_feature = "sse4.1", target_feature = "bmi2"))]
-mod fast {
+pub mod fast {
     use core::arch::x86_64::*;
 
     /// Returns q-1, where q in 1..=64 is the smallest prefix length maximising
