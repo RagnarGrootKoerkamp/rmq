@@ -291,6 +291,12 @@ fn time_queries<'a, T: 'a, R: RMQ<'a, T>>(
         |(l, r)| {
             let d = prev & zero;
             prev = rmq.rmq(l + d, r + d);
+            // A predicted branch inside rmq yields `prev` before its loads resolve, which would
+            // let the next query start early. lfence waits until this query has fully completed.
+            #[cfg(target_arch = "x86_64")]
+            unsafe {
+                core::arch::x86_64::_mm_lfence()
+            };
             prev
         },
         QUERY_WARMUP_REPETITIONS,
