@@ -102,8 +102,7 @@ impl RangeDistribution {
                 assert!(n > lo, "n={n} too small for range size 2^{b}");
                 loop {
                     // l >= n - lo can never give a valid r, so don't sample it
-                    // TEMP: block-aligned l, so ranges shorter than 32 stay in one block.
-                    let l = rng.random_range(0..(n - lo).div_ceil(32)) * 32;
+                    let l = rng.random_range(0..n - lo);
                     let r = rng.random_range(l + lo..l + hi);
                     if r < n {
                         return (l, r);
