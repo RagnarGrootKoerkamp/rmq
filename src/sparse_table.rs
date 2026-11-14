@@ -3,6 +3,7 @@ use std::{marker::PhantomData, ptr::NonNull};
 use mem_dbg::{FlatType, HashMap, MemDbg, MemDbgImpl, MemSize, SizeFlags};
 
 use crate::base::{BuildableSlice, RMQ, TwoArgMin};
+use crate::data::RMQValue;
 
 use sux::{
     bits::{BitFieldVec, BitFieldVecU},
@@ -352,7 +353,7 @@ pub struct ValueSparseTable<'a, T> {
     _marker: PhantomData<&'a T>,
 }
 
-impl<'a, T: Copy + Into<u32>> ValueSparseTable<'a, T> {
+impl<'a, T: RMQValue> ValueSparseTable<'a, T> {
     pub fn new(data: &'a [T], indices: &[usize]) -> Self {
         let n = indices.len();
         let k_max = n.ilog2() as usize;
@@ -364,7 +365,7 @@ impl<'a, T: Copy + Into<u32>> ValueSparseTable<'a, T> {
         };
 
         for i in 0..n {
-            table.entries[i] = (data[indices[i]].into() as u64) << 32 | (i as u64);
+            table.entries[i] = (data[indices[i]].into_u32() as u64) << 32 | (i as u64);
         }
         for k in 1..=table.k_max {
             for i in 0..table.n + 1 - (1 << k) {
@@ -377,7 +378,7 @@ impl<'a, T: Copy + Into<u32>> ValueSparseTable<'a, T> {
     }
 }
 
-impl<'a, T: Copy + Into<u32>> RMQ<'a, T> for ValueSparseTable<'a, T> {
+impl<'a, T: RMQValue> RMQ<'a, T> for ValueSparseTable<'a, T> {
     fn new(data: &'a [T]) -> Self
     where
         Self: Sized,
@@ -402,7 +403,7 @@ impl<'a, T: Copy + Into<u32>> RMQ<'a, T> for ValueSparseTable<'a, T> {
 }
 
 crate::rmq_family! {
-    pub ValueSparseTableFamily => ValueSparseTable where T: Copy + Into<u32>
+    pub ValueSparseTableFamily => ValueSparseTable where T: RMQValue
 }
 
 /// Same layout as `ValueSparseTable`, with a batched query path that hides
@@ -416,7 +417,7 @@ pub struct FastValueSparseTable<'a, T> {
     _marker: PhantomData<&'a T>,
 }
 
-impl<'a, T: Copy + Into<u32>> FastValueSparseTable<'a, T> {
+impl<'a, T: RMQValue> FastValueSparseTable<'a, T> {
     pub fn new(data: &'a [T], indices: &[usize]) -> Self {
         let n = indices.len();
         let k_max = n.ilog2() as usize;
@@ -428,7 +429,7 @@ impl<'a, T: Copy + Into<u32>> FastValueSparseTable<'a, T> {
         };
 
         for i in 0..n {
-            table.entries[i] = (data[indices[i]].into() as u64) << 32 | (i as u64);
+            table.entries[i] = (data[indices[i]].into_u32() as u64) << 32 | (i as u64);
         }
         for k in 1..=table.k_max {
             for i in 0..table.n + 1 - (1 << k) {
@@ -486,7 +487,7 @@ fn prefetch<T>(p: *const T) {
     let _ = p;
 }
 
-impl<'a, T: Copy + Into<u32>> RMQ<'a, T> for FastValueSparseTable<'a, T> {
+impl<'a, T: RMQValue> RMQ<'a, T> for FastValueSparseTable<'a, T> {
     fn new(data: &'a [T]) -> Self
     where
         Self: Sized,
@@ -537,7 +538,7 @@ impl<'a, T: Copy + Into<u32>> RMQ<'a, T> for FastValueSparseTable<'a, T> {
 }
 
 crate::rmq_family! {
-    pub FastValueSparseTableFamily => FastValueSparseTable where T: Copy + Into<u32>
+    pub FastValueSparseTableFamily => FastValueSparseTable where T: RMQValue
 }
 
 #[derive(MemSize, MemDbg)]
@@ -698,7 +699,7 @@ impl<'a, V: Copy, R: RMQ<'a, V>> RMQ<'a, V> for OwningRMQWrapper<'a, V, R> {
     }
 
     fn rmq(&self, l: usize, r: usize) -> usize {
-        if l==r {
+        if l == r {
             return self.position(l);
         }
         self.position(self.inner.rmq(l, r))
@@ -733,7 +734,7 @@ fn transposed_slot(i: usize, k: usize, n: usize) -> usize {
 
 const INDEX_MASK: u64 = (1u64 << 32) - 1;
 
-impl<'a, T: Copy + Into<u32>> FanoutValueSparseTable<'a, T> {
+impl<'a, T: RMQValue> FanoutValueSparseTable<'a, T> {
     pub fn new(data: &'a [T], indices: &[usize]) -> Self {
         let n = indices.len();
         let k_max = n.ilog2() as usize;
@@ -743,7 +744,7 @@ impl<'a, T: Copy + Into<u32>> FanoutValueSparseTable<'a, T> {
         // Level 0 has stride 1, so its transposed layout is the identity.
         levels.push(
             (0..n)
-                .map(|i| (data[indices[i]].into() as u64) << 32 | (i as u64))
+                .map(|i| (data[indices[i]].into_u32() as u64) << 32 | (i as u64))
                 .collect(),
         );
         for k in (2..=k_max).step_by(2) {
@@ -766,7 +767,7 @@ impl<'a, T: Copy + Into<u32>> FanoutValueSparseTable<'a, T> {
     }
 }
 
-impl<'a, T: Copy + Into<u32>> RMQ<'a, T> for FanoutValueSparseTable<'a, T> {
+impl<'a, T: RMQValue> RMQ<'a, T> for FanoutValueSparseTable<'a, T> {
     fn new(data: &'a [T]) -> Self
     where
         Self: Sized,
@@ -779,7 +780,7 @@ impl<'a, T: Copy + Into<u32>> RMQ<'a, T> for FanoutValueSparseTable<'a, T> {
     fn rmq(&self, l: usize, r: usize) -> usize {
         let n = self.n;
         let k = (r - l + 1).ilog2() as usize;
-        let entry = if k % 2 == 0 {
+        let entry = if k.is_multiple_of(2) {
             // Two overlapping windows of size 2^k
             let level = &self.levels[k / 2];
             let j = r + 1 - (1 << k);
@@ -810,5 +811,5 @@ impl<'a, T: Copy + Into<u32>> RMQ<'a, T> for FanoutValueSparseTable<'a, T> {
 }
 
 crate::rmq_family! {
-    pub FanoutValueSparseTableFamily => FanoutValueSparseTable where T: Copy + Into<u32>
+    pub FanoutValueSparseTableFamily => FanoutValueSparseTable where T: RMQValue
 }

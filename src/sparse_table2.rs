@@ -5,7 +5,7 @@ use mem_dbg::{MemDbg, MemSize};
 use crate::{
     base::{RMQ, TwoArgMin},
     cartesian_tree::convert_to_minheap,
-    sparse_table::{CustomOffsetST, Getter, IndexST, PositionOffsetSparseTable},
+    sparse_table::{CustomOffsetST, Getter, PositionOffsetSparseTable},
 };
 
 use sux::{
@@ -24,7 +24,7 @@ impl<'a, T: Copy> Getter<T> for STLookupBlocksInner<'a, T> {
     #[inline]
     fn get(&self, i: usize) -> T {
         let iblock_idx = self.block_responses[self.block_id[i] + _range_index(0, self.b - 1)];
-        return self.data[self.b * i + iblock_idx as usize];
+        self.data[self.b * i + iblock_idx as usize]
     }
 }
 

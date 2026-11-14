@@ -44,7 +44,11 @@ pub fn rmq_on_minheap(id: u64, width: usize, l: usize, r: usize) -> usize {
 
 // region: rmq_on_minheap using nibble groups (Fable)
 
-#[cfg(all(target_arch = "x86_64", target_feature = "sse4.1", target_feature = "bmi2"))]
+#[cfg(all(
+    target_arch = "x86_64",
+    target_feature = "sse4.1",
+    target_feature = "bmi2"
+))]
 pub mod fast {
     use core::arch::x86_64::*;
 
@@ -55,7 +59,9 @@ pub mod fast {
         unsafe {
             // Per-nibble tables, indexed by nibble value 0..15.
             let nexc = _mm_setr_epi8(4, 2, 2, 0, 2, 0, 0, -2, 2, 0, 0, -2, 0, -2, -2, -4);
-            let key = _mm_setr_epi8(65, 63, 64, 62, 65, 63, 63, 61, 65, 63, 64, 62, 64, 62, 62, 60);
+            let key = _mm_setr_epi8(
+                65, 63, 64, 62, 65, 63, 63, 61, 65, 63, 64, 62, 64, 62, 62, 60,
+            );
             let pos = _mm_setr_epi8(0, 0, 1, 1, 0, 0, 2, 2, 0, 0, 1, 1, 3, 3, 3, 3);
             let base = _mm_setr_epi8(0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60);
 

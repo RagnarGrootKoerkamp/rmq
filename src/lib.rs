@@ -2,7 +2,9 @@ extern crate rand;
 
 pub mod base;
 pub mod bbst;
+pub mod benchmarking;
 pub mod cartesian_tree;
+pub mod data;
 pub mod flrmq;
 pub mod naive;
 pub mod rmq_tree;

@@ -288,7 +288,7 @@ impl<'a, T: Ord + Copy, const B: usize> RMQ<'a, T> for StridedIndexMinHeapSparse
             sparse_table: OwningOffsetSparseTable::new(data, &indices),
             block_ids0,
             block_ids1,
-            affix_bits
+            affix_bits,
         }
     }
 
@@ -299,8 +299,13 @@ impl<'a, T: Ord + Copy, const B: usize> RMQ<'a, T> for StridedIndexMinHeapSparse
 
         if lblock == rblock {
             return self.in_block(&self.block_ids0, lblock, l - lblock * B, r - lblock * B);
-        } else if (l + B/2)/B == (r + B/2)/B {
-            return self.in_block(&self.block_ids1, (l+B/2)/B, (l+B/2) % B, (r+B/2) % B) - B/2;
+        } else if (l + B / 2) / B == (r + B / 2) / B {
+            return self.in_block(
+                &self.block_ids1,
+                (l + B / 2) / B,
+                (l + B / 2) % B,
+                (r + B / 2) % B,
+            ) - B / 2;
         }
 
         let over_sample_result = self.sparse_table.rmq(lblock, rblock);
@@ -325,13 +330,21 @@ impl<'a, T: Ord + Copy, const B: usize> RMQ<'a, T> for StridedIndexMinHeapSparse
 impl<'a, T: Ord + Copy, const B: usize> StridedIndexMinHeapSparseTable<'a, T, B> {
     // Leftmost minimum of block[l..=r], with l and r relative to the block start
     #[inline]
-    #[cfg(all(target_arch = "x86_64", target_feature = "sse4.1", target_feature = "bmi2"))]
+    #[cfg(all(
+        target_arch = "x86_64",
+        target_feature = "sse4.1",
+        target_feature = "bmi2"
+    ))]
     fn in_block(&self, block_ids: &BitFieldVec, block: usize, l: usize, r: usize) -> usize {
         let id = unsafe { block_ids.get_value_unchecked(block) } as u64;
         block * B + crate::cartesian_tree::fast::rmq_on_minheap(id, B, l, r)
     }
     #[inline]
-    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse4.1", target_feature = "bmi2")))]
+    #[cfg(not(all(
+        target_arch = "x86_64",
+        target_feature = "sse4.1",
+        target_feature = "bmi2"
+    )))]
     fn in_block(&self, block_ids: &BitFieldVec, block: usize, l: usize, r: usize) -> usize {
         let id = unsafe { block_ids.get_value_unchecked(block) } as u64;
         block * B + crate::cartesian_tree::rmq_on_minheap(id, B, l, r)
