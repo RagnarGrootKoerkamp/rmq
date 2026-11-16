@@ -1,6 +1,7 @@
 use mem_dbg::{FlatType, MemDbg};
 
 use crate::bbst::BbSTValue;
+use crate::flrmq::FLRMQValue;
 use rand::{Rng, RngExt, SeedableRng, rngs::Xoshiro256PlusPlus, seq::SliceRandom};
 use std::fs::File;
 use std::io;
@@ -11,7 +12,7 @@ use needletail::parse_fastx_file;
 
 /// `BbSTValue` is a supertrait so generic code can always visit the BbST families;
 /// a new value type needs C++ BbST bindings in `bbst.rs`.
-pub trait RMQValue: Copy + Ord + MemDbg + FlatType + BbSTValue {
+pub trait RMQValue: Copy + Ord + MemDbg + FlatType + BbSTValue + FLRMQValue {
     /// Truncating cast, like `x as Self`.
     fn from_u64(x: u64) -> Self;
     /// Lossless conversion into u32. Panics if `Self` is wider than u32.

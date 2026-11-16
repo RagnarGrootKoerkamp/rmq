@@ -93,8 +93,7 @@ enum VisitKey {
     All,
     Compact,
     Fast,
-    #[value(name = "bbst")]
-    BbST,
+    External
 }
 
 fn visit_by_key<T: RMQValue>(v: &mut impl RMQVisitor<T>, key: VisitKey) -> io::Result<()> {
@@ -132,7 +131,8 @@ fn visit_by_key<T: RMQValue>(v: &mut impl RMQVisitor<T>, key: VisitKey) -> io::R
             v.visit::<FanoutValueSparseTableFamily>()?;
             v.visit::<OffsetSparseTableFamily>()?;
         }
-        VisitKey::BbST => {
+        VisitKey::External => {
+            v.visit::<BbSTFamily<6>>()?;
             v.visit::<BbSTFamily<9>>()?;
             v.visit::<BbST2Family<9, 6>>()?;
             v.visit::<BbST2Family<12, 8>>()?;
@@ -140,6 +140,8 @@ fn visit_by_key<T: RMQValue>(v: &mut impl RMQVisitor<T>, key: VisitKey) -> io::R
             for_each!(B in [64, 512, 4096] { v.visit::<StridedIndexSparseTableFamily<B>>()?; });
             for_each!(B in [32, 64, 512, 4096] { v.visit::<StridedIndexAffixMasksSparseTableFamily<B>>()?; });
             v.visit::<StridedIndexMinHeapSparseTableFamily<32>>()?;
+
+            for_each!(E in [64, 128, 256, 512, 1024, 2048] { v.visit::<FLRMQFamily<E>>()?; });
         }
     }
 
