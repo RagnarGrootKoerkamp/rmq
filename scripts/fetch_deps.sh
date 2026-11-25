@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Clone the C++ RMQ libraries that build.rs compiles into BbST/ and FL-RMQ/, at the
+# Clone the C++ RMQ libraries that build.rs compiles into BbST/, FL-RMQ/ and pixie/, at the
 # commits the bindings were written and tested against, plus FL-RMQ's sdsl-lite
 # submodule (its only dependency the bindings need). Run from anywhere; a library
 # already checked out at its pinned commit is left alone.
@@ -28,6 +28,8 @@ fetch() {
 
 fetch BbST https://github.com/kowallus/BbST 2161935921b00062ebe7a9c8118be5e6ce0ed7fe
 fetch FL-RMQ https://github.com/FilippoLari/FL-RMQ ab55003b7b8808b44d0c304d127eff9da911dbc2
+# Header-only; its agentic/cpp submodule isn't needed.
+fetch pixie https://github.com/Malkovsky/pixie 0b21d28920c061a7f391d1a39107639152447ad0
 
 # The pinned sdsl-lite commit is recorded in FL-RMQ itself.
 git -C FL-RMQ submodule update --init --depth 1 libs/sdsl-lite

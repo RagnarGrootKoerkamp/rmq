@@ -3,6 +3,8 @@
 //   See src/bbst.rs.
 // - FL-RMQ (FL-RMQ/) through ffi/flrmq_shim.cpp, once per value type, with
 //   every epsilon in FLRMQ_EPSILONS. See src/flrmq.rs.
+// - pixie's HybridBTree (pixie/) through ffi/pixie_shim.cpp, once per value
+//   type, with every supported leaf size. See src/pixie.rs.
 
 const TYPES: &[(&str, &str, &str)] = &[
     ("u8", "uint8_t", "UINT8_MAX"),
@@ -20,11 +22,13 @@ fn main() {
     println!("cargo:rerun-if-changed=BbST/bbst.cpp");
     println!("cargo:rerun-if-changed=BbST/bbst.h");
     println!("cargo:rerun-if-changed=FL-RMQ/include");
+    println!("cargo:rerun-if-changed=pixie/include");
 
     let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let native = native_cpu_flag();
     build_bbst(&out_dir, native);
     build_flrmq(&out_dir, native);
+    build_pixie(&out_dir, native);
 }
 
 /// The C++ counterpart of `-C target-cpu=native` (set in .cargo/config.toml), which
@@ -133,4 +137,39 @@ fn build_flrmq(out_dir: &std::path::Path, native: &str) {
     build.compile("flrmq");
     // Declares the matching extern functions on the Rust side.
     std::fs::write(out_dir.join("flrmq_ops.rs"), rust_ops).unwrap();
+}
+
+fn build_pixie(out_dir: &std::path::Path, native: &str) {
+    let include = "pixie/include";
+    assert!(
+        std::path::Path::new(include).is_dir(),
+        "pixie is missing: run scripts/fetch_deps.sh"
+    );
+
+    let mut build = cc::Build::new();
+    build
+        .cpp(true)
+        .std("c++20")
+        .opt_level(3)
+        .flag(native)
+        .include(include)
+        .flag_if_supported("-Wno-sign-compare")
+        .flag_if_supported("-Wno-unused-parameter")
+        .flag_if_supported("-Wno-unused-but-set-variable");
+
+    let shim = std::fs::canonicalize("ffi/pixie_shim.cpp").unwrap();
+    for &(rust_ty, c_ty, _) in TYPES {
+        // One wrapper TU per value type; the leaf sizes are all in the shim.
+        let wrapper = out_dir.join(format!("pixie_{rust_ty}.cpp"));
+        std::fs::write(
+            &wrapper,
+            format!(
+                "#define PIXIE_VALUE_T {c_ty}\n#define PIXIE_NAME {rust_ty}\n#include \"{}\"\n",
+                shim.display()
+            ),
+        )
+        .unwrap();
+        build.file(wrapper);
+    }
+    build.compile("pixie");
 }

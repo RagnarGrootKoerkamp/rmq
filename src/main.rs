@@ -142,6 +142,8 @@ fn visit_by_key<T: RMQValue>(v: &mut impl RMQVisitor<T>, key: VisitKey) -> io::R
             v.visit::<StridedIndexMinHeapSparseTableFamily<32>>()?;
 
             for_each!(E in [64, 128, 256, 512, 1024, 2048] { v.visit::<FLRMQFamily<E>>()?; });
+
+            for_each!(L in [248, 252, 496] { v.visit::<HybridBTreeFamily<L>>()?; });
         }
     }
 

@@ -7,6 +7,7 @@ pub mod cartesian_tree;
 pub mod data;
 pub mod flrmq;
 pub mod naive;
+pub mod pixie;
 pub mod rmq_tree;
 pub mod sparse_table;
 pub mod sparse_table2;
@@ -17,6 +18,7 @@ pub mod testing;
 pub use bbst::{BbST2Family, BbSTFamily};
 pub use flrmq::FLRMQFamily;
 pub use naive::NaiveRMQFamily;
+pub use pixie::HybridBTreeFamily;
 pub use rmq_tree::{FanoutRMQTreeFamily, PackedRMQTreeFamily, RMQTreeFamily};
 pub use sparse_table::{
     CustomOffsetSparseTableFamily, FanoutValueSparseTableFamily, FastValueSparseTableFamily,

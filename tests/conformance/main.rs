@@ -2,6 +2,7 @@
 // families defined in the src file of the same name.
 mod bbst;
 mod flrmq;
+mod pixie;
 mod rmq_tree;
 mod sparse_table;
 mod sparse_table2;
